@@ -1,3 +1,15 @@
+const TYPE_LABELS = {
+  restaurants: "Restaurants",
+  retail_services: "Retail & services",
+  beauty_wellness: "Beauty & wellness",
+  fitness_nutrition: "Fitness & nutrition",
+  arts_entertainment: "Arts & entertainment",
+  specialty_lounges: "Specialty lounges",
+  auto_services: "Auto services",
+  body_art: "Body art",
+  pet_services: "Pet services",
+};
+
 const map = new maplibregl.Map({
   container: "map",
   style: "https://tiles.openfreemap.org/styles/liberty",
@@ -8,6 +20,59 @@ const map = new maplibregl.Map({
 
 map.addControl(new maplibregl.NavigationControl({ visualizePitch: false }), "top-right");
 map.addControl(new maplibregl.ScaleControl({ maxWidth: 120 }), "bottom-right");
+
+let popup = new maplibregl.Popup({
+  closeButton: true,
+  closeOnClick: true,
+  maxWidth: "300px",
+  offset: 14,
+});
+
+function typeLabel(key) {
+  return TYPE_LABELS[key] || key.replaceAll("_", " ");
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
+}
+
+function showPopup(feature) {
+  const p = feature.properties;
+  const [lng, lat] = feature.geometry.coordinates;
+  const badges = [
+    `<span class="badge">${escapeHtml(typeLabel(p.businessType))}</span>`,
+  ];
+  if (p.giftCard === true || p.giftCard === "true") {
+    badges.push(`<span class="badge">Gift cards</span>`);
+  }
+  if (p.orderingStatus === "closed") {
+    badges.push(`<span class="badge warn">Orders paused</span>`);
+  }
+
+  const statusNote = p.orderingStatusMessage
+    ? `<p>${escapeHtml(p.orderingStatusMessage)}</p>`
+    : "";
+  const link = p.orderingUrl
+    ? `<a href="${escapeHtml(p.orderingUrl)}" target="_blank" rel="noopener noreferrer">Open Clover ordering â†’</a>`
+    : "";
+
+  popup
+    .setLngLat([lng, lat])
+    .setHTML(
+      `<div class="popup">
+        <h2>${escapeHtml(p.name)}</h2>
+        ${badges.join("")}
+        <p>${escapeHtml(p.address || [p.city, p.state].filter(Boolean).join(", "))}</p>
+        ${statusNote}
+        ${link}
+      </div>`
+    )
+    .addTo(map);
+}
 
 function addMerchantLayers() {
   map.addSource("merchants", {
@@ -88,6 +153,10 @@ function addMerchantLayers() {
       center: features[0].geometry.coordinates,
       zoom,
     });
+  });
+
+  map.on("click", "unclustered", (e) => {
+    showPopup(e.features[0]);
   });
 
   map.on("mouseenter", "clusters", () => {
