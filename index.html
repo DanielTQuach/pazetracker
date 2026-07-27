@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PazeTracker â€” Clover merchants map</title>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div id="app">
+      <aside class="panel" aria-label="Sidebar">
+        <header class="panel-header">
+          <p class="brand">PazeTracker</p>
+          <h1>Clover merchants</h1>
+          <p class="subtitle">
+            US restaurants, cafes &amp; businesses with Clover online checkout
+          </p>
+        </header>
+        <footer class="panel-footer">
+          <p>Data from public Clover online-ordering listings.</p>
+        </footer>
+      </aside>
+      <main id="map" role="application" aria-label="Merchant map"></main>
+    </div>
+    <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+    <script src="app.js" type="module"></script>
+  </body>
+</html>
