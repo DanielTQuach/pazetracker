@@ -12,7 +12,7 @@
   </head>
   <body>
     <div id="app">
-      <aside class="panel" aria-label="Sidebar">
+      <aside class="panel" aria-label="Filters">
         <header class="panel-header">
           <p class="brand">PazeTracker</p>
           <h1>Clover merchants</h1>
@@ -20,12 +20,54 @@
             US restaurants, cafes &amp; businesses with Clover online checkout
           </p>
         </header>
+
+        <div class="stat" id="stat">Loadingâ€¦</div>
+
+        <label class="field">
+          <span>Search</span>
+          <input
+            id="search"
+            type="search"
+            placeholder="Name, city, or address"
+            autocomplete="off"
+          />
+        </label>
+
+        <label class="field">
+          <span>Business type</span>
+          <select id="businessType">
+            <option value="">All types</option>
+          </select>
+        </label>
+
+        <label class="check">
+          <input type="checkbox" id="giftCardOnly" />
+          <span>Gift card checkout only</span>
+        </label>
+
+        <label class="check">
+          <input type="checkbox" id="acceptingOnly" />
+          <span>Accepting online orders</span>
+        </label>
+
+        <div class="actions">
+          <button type="button" id="locate" class="btn">Near me</button>
+          <button type="button" id="reset" class="btn btn-ghost">Reset</button>
+        </div>
+
+        <ul id="results" class="results" hidden></ul>
+
         <footer class="panel-footer">
-          <p>Data from public Clover online-ordering listings.</p>
+          <p>
+            Data aggregated from public Clover online-ordering listings.
+            Eligibility and order status can change.
+          </p>
         </footer>
       </aside>
+
       <main id="map" role="application" aria-label="Merchant map"></main>
     </div>
+
     <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
     <script src="app.js" type="module"></script>
   </body>
