@@ -21,6 +21,14 @@ const map = new maplibregl.Map({
 map.addControl(new maplibregl.NavigationControl({ visualizePitch: false }), "top-right");
 map.addControl(new maplibregl.ScaleControl({ maxWidth: 120 }), "bottom-right");
 
+const searchInput = document.getElementById("search");
+const typeSelect = document.getElementById("businessType");
+const giftCardOnly = document.getElementById("giftCardOnly");
+const acceptingOnly = document.getElementById("acceptingOnly");
+const resultsEl = document.getElementById("results");
+const statEl = document.getElementById("stat");
+
+let allFeatures = [];
 let popup = new maplibregl.Popup({
   closeButton: true,
   closeOnClick: true,
@@ -32,12 +40,86 @@ function typeLabel(key) {
   return TYPE_LABELS[key] || key.replaceAll("_", " ");
 }
 
+function matchesFilters(props, query) {
+  if (giftCardOnly.checked && !props.giftCard) return false;
+  if (acceptingOnly.checked && props.orderingStatus === "closed") return false;
+
+  const selectedType = typeSelect.value;
+  if (selectedType && props.businessType !== selectedType) return false;
+
+  if (!query) return true;
+  const hay = `${props.name} ${props.city} ${props.state} ${props.address}`.toLowerCase();
+  return query.split(/\s+/).every((token) => hay.includes(token));
+}
+
+function filteredCollection() {
+  const query = searchInput.value.trim().toLowerCase();
+  return {
+    type: "FeatureCollection",
+    features: allFeatures.filter((f) => matchesFilters(f.properties, query)),
+  };
+}
+
+function updateStat(count) {
+  statEl.innerHTML = `<strong>${count.toLocaleString()}</strong> merchants shown`;
+}
+
+function renderResults(collection) {
+  const query = searchInput.value.trim();
+  if (!query) {
+    resultsEl.hidden = true;
+    resultsEl.innerHTML = "";
+    return;
+  }
+
+  const hits = collection.features.slice(0, 40);
+  resultsEl.hidden = hits.length === 0;
+  resultsEl.innerHTML = hits
+    .map((f, i) => {
+      const p = f.properties;
+      return `<li tabindex="0" data-index="${i}">
+        <span class="name">${escapeHtml(p.name)}</span>
+        <span class="meta">${escapeHtml([p.city, p.state].filter(Boolean).join(", "))} Ã‚Â· ${escapeHtml(typeLabel(p.businessType))}</span>
+      </li>`;
+    })
+    .join("");
+
+  resultsEl.querySelectorAll("li").forEach((li) => {
+    const focus = () => {
+      const feature = hits[Number(li.dataset.index)];
+      flyToFeature(feature);
+      showPopup(feature);
+    };
+    li.addEventListener("click", focus);
+    li.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        focus();
+      }
+    });
+  });
+}
+
 function escapeHtml(value) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;");
+}
+
+function applyFilters() {
+  const collection = filteredCollection();
+  if (map.getSource("merchants")) {
+    map.getSource("merchants").setData(collection);
+  }
+  updateStat(collection.features.length);
+  renderResults(collection);
+}
+
+function flyToFeature(feature) {
+  const [lng, lat] = feature.geometry.coordinates;
+  map.flyTo({ center: [lng, lat], zoom: Math.max(map.getZoom(), 14), speed: 1.2 });
 }
 
 function showPopup(feature) {
@@ -57,7 +139,7 @@ function showPopup(feature) {
     ? `<p>${escapeHtml(p.orderingStatusMessage)}</p>`
     : "";
   const link = p.orderingUrl
-    ? `<a href="${escapeHtml(p.orderingUrl)}" target="_blank" rel="noopener noreferrer">Open Clover ordering â†’</a>`
+    ? `<a href="${escapeHtml(p.orderingUrl)}" target="_blank" rel="noopener noreferrer">Open Clover ordering Ã¢â€ â€™</a>`
     : "";
 
   popup
@@ -72,6 +154,38 @@ function showPopup(feature) {
       </div>`
     )
     .addTo(map);
+}
+
+function populateTypeOptions(features) {
+  const counts = new Map();
+  for (const f of features) {
+    const key = f.properties.businessType || "restaurants";
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+
+  const preferred = [
+    "restaurants",
+    "retail_services",
+    "beauty_wellness",
+    "fitness_nutrition",
+    "arts_entertainment",
+    "specialty_lounges",
+    "auto_services",
+    "body_art",
+    "pet_services",
+  ];
+
+  const keys = [
+    ...preferred.filter((k) => counts.has(k)),
+    ...[...counts.keys()].filter((k) => !preferred.includes(k)).sort(),
+  ];
+
+  for (const key of keys) {
+    const opt = document.createElement("option");
+    opt.value = key;
+    opt.textContent = `${typeLabel(key)} (${counts.get(key).toLocaleString()})`;
+    typeSelect.appendChild(opt);
+  }
 }
 
 function addMerchantLayers() {
@@ -156,7 +270,8 @@ function addMerchantLayers() {
   });
 
   map.on("click", "unclustered", (e) => {
-    showPopup(e.features[0]);
+    const feature = e.features[0];
+    showPopup(feature);
   });
 
   map.on("mouseenter", "clusters", () => {
@@ -174,11 +289,58 @@ function addMerchantLayers() {
 }
 
 async function loadData() {
-  const geoRes = await fetch("./data/clover-merchants.geojson");
+  const [geoRes, metaRes] = await Promise.all([
+    fetch("./data/clover-merchants.geojson"),
+    fetch("./data/meta.json"),
+  ]);
   if (!geoRes.ok) throw new Error("Failed to load merchant GeoJSON");
   const geojson = await geoRes.json();
-  map.getSource("merchants").setData(geojson);
+  allFeatures = geojson.features || [];
+  populateTypeOptions(allFeatures);
+
+  if (metaRes.ok) {
+    const meta = await metaRes.json();
+    console.info("Merchant data", meta);
+  }
+
+  applyFilters();
 }
+
+searchInput.addEventListener("input", () => {
+  window.clearTimeout(searchInput._t);
+  searchInput._t = window.setTimeout(applyFilters, 120);
+});
+typeSelect.addEventListener("change", applyFilters);
+giftCardOnly.addEventListener("change", applyFilters);
+acceptingOnly.addEventListener("change", applyFilters);
+
+document.getElementById("reset").addEventListener("click", () => {
+  searchInput.value = "";
+  typeSelect.value = "";
+  giftCardOnly.checked = false;
+  acceptingOnly.checked = false;
+  applyFilters();
+  map.flyTo({ center: [-98.35, 39.5], zoom: 3.6 });
+  popup.remove();
+});
+
+document.getElementById("locate").addEventListener("click", () => {
+  if (!navigator.geolocation) {
+    alert("Geolocation is not available in this browser.");
+    return;
+  }
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      map.flyTo({
+        center: [pos.coords.longitude, pos.coords.latitude],
+        zoom: 11.5,
+        speed: 1.4,
+      });
+    },
+    () => alert("Could not get your location."),
+    { enableHighAccuracy: true, timeout: 10000 }
+  );
+});
 
 map.on("load", async () => {
   addMerchantLayers();
@@ -186,5 +348,6 @@ map.on("load", async () => {
     await loadData();
   } catch (err) {
     console.error(err);
+    statEl.textContent = "Could not load merchant data.";
   }
 });
