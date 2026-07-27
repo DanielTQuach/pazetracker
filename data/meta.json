@@ -1,0 +1,17 @@
+{
+  "count": 28036,
+  "byType": {
+    "restaurants": 26478,
+    "fitness_nutrition": 184,
+    "retail_services": 819,
+    "beauty_wellness": 357,
+    "specialty_lounges": 48,
+    "body_art": 17,
+    "auto_services": 48,
+    "pet_services": 9,
+    "arts_entertainment": 76
+  },
+  "giftCards": 906,
+  "generatedAt": "2026-07-27T08:23:01.405Z",
+  "source": "nextcard discovery-map restaurants snapshot (clover-paze)"
+}
