@@ -1,0 +1,9 @@
+{
+  "name": "pazetracker",
+  "version": "1.0.0",
+  "private": true,
+  "description": "MapLibre map of US Clover merchants (Paze checkout)",
+  "scripts": {
+    "start": "npx --yes serve -l 5173 ."
+  }
+}
