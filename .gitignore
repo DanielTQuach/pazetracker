@@ -2,4 +2,7 @@ node_modules/
 .DS_Store
 *.log
 .cache/
+.env
 data/clover-merchants.geojson
+data/order-reports.ndjson
+data/user-cards.json
