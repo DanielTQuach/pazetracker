@@ -10,6 +10,19 @@ import {
   isValidGooglePhotoRef,
   searchGooglePlacePhotos,
 } from "./scripts/google-place-photos.mjs";
+import {
+  bumpPromoRedeemed,
+  getCommunityTracker,
+  getPlaceOrderStats,
+  getUserCards,
+  initStore,
+  logPromoUse,
+  markPromoUseReceived,
+  recordOrderReport,
+  todayLocalDateKey,
+  upsertUserCard,
+  usesPostgres,
+} from "./db/store.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = __dirname;
@@ -49,8 +62,7 @@ function loadEnvFile() {
 
 loadEnvFile();
 
-const APP_ORIGIN =
-  process.env.APP_ORIGIN || `http://localhost:${PORT}`;
+const APP_ORIGIN = process.env.APP_ORIGIN || `http://localhost:${PORT}`;
 const CLERK_PUBLISHABLE_KEY = process.env.CLERK_PUBLISHABLE_KEY || "";
 const CLERK_SECRET_KEY = process.env.CLERK_SECRET_KEY || "";
 const CLERK_JWT_KEY = process.env.CLERK_JWT_KEY || "";
@@ -104,224 +116,11 @@ const photoBytesCache = new Map();
 const CACHE_TTL_MS = 10 * 60 * 1000;
 const PHOTO_BYTES_TTL_MS = 24 * 60 * 60 * 1000;
 
-// -----------------------------
-// Order crowdsource reporting
-// -----------------------------
-const ORDER_REPORTS_PATH = path.join(ROOT, "data", "order-reports.ndjson");
-fs.mkdirSync(path.dirname(ORDER_REPORTS_PATH), { recursive: true });
-const USER_CARDS_PATH = path.join(ROOT, "data", "user-cards.json");
-const COMMUNITY_STATS_PATH = path.join(ROOT, "data", "community-stats.json");
-const PROMO_REFUND_REPORTS_PATH = path.join(ROOT, "data", "promo-refund-reports.ndjson");
-fs.mkdirSync(path.dirname(PROMO_REFUND_REPORTS_PATH), { recursive: true });
-
-/** @type {Map<string, { yes: number, no: number, lastReportedAt: string | null }>} */
-const orderStatsByPlaceId = new Map();
-
-const PZ_PROMO_VALUE_DOLLARS = 10;
-
-/** @type {{ promosRedeemed: number, promosRefundConfirmed: number, successfulOrders: number, failedOrders: number, updatedAt: string | null }} */
-let communityStats = {
-  promosRedeemed: 0,
-  promosRefundConfirmed: 0,
-  successfulOrders: 0,
-  failedOrders: 0,
-  updatedAt: null,
-};
-
-function persistCommunityStats() {
-  fs.writeFileSync(COMMUNITY_STATS_PATH, JSON.stringify(communityStats, null, 2));
-}
-
-function readCommunityStatsFile() {
-  if (!fs.existsSync(COMMUNITY_STATS_PATH)) return null;
-  try {
-    const parsed = JSON.parse(fs.readFileSync(COMMUNITY_STATS_PATH, "utf8"));
-    if (!parsed || typeof parsed !== "object") return null;
-    return {
-      promosRedeemed: Math.max(0, Number(parsed.promosRedeemed) || 0),
-      promosRefundConfirmed: Math.max(
-        0,
-        Number(parsed.promosRefundConfirmed) || 0
-      ),
-      successfulOrders: Math.max(0, Number(parsed.successfulOrders) || 0),
-      failedOrders: Math.max(0, Number(parsed.failedOrders) || 0),
-      updatedAt: parsed.updatedAt || null,
-    };
-  } catch {
-    return null;
-  }
-}
-
-function loadOrderStatsFromDisk() {
-  let yes = 0;
-  let no = 0;
-  let updatedAt = null;
-  if (!fs.existsSync(ORDER_REPORTS_PATH)) {
-    return { yes, no, updatedAt };
-  }
-  const raw = fs.readFileSync(ORDER_REPORTS_PATH, "utf8");
-  const lines = raw.split(/\r?\n/).filter(Boolean);
-  for (const line of lines) {
-    try {
-      const r = JSON.parse(line);
-      if (!r?.placeId) continue;
-      const s = orderStatsByPlaceId.get(r.placeId) || {
-        yes: 0,
-        no: 0,
-        lastReportedAt: null,
-      };
-      if (r.success) {
-        s.yes += 1;
-        yes += 1;
-      } else {
-        s.no += 1;
-        no += 1;
-      }
-      s.lastReportedAt = r.createdAt || null;
-      orderStatsByPlaceId.set(r.placeId, s);
-      updatedAt = r.createdAt || updatedAt;
-    } catch {
-      // ignore corrupted lines
-    }
-  }
-  return { yes, no, updatedAt };
-}
-
-const derivedOrderTotals = loadOrderStatsFromDisk();
-const savedCommunityStats = readCommunityStatsFile();
-communityStats = {
-  promosRedeemed: Math.max(
-    savedCommunityStats?.promosRedeemed || 0,
-    derivedOrderTotals.yes
-  ),
-  promosRefundConfirmed: Math.max(0, savedCommunityStats?.promosRefundConfirmed || 0),
-  successfulOrders: Math.max(
-    savedCommunityStats?.successfulOrders || 0,
-    derivedOrderTotals.yes
-  ),
-  failedOrders: Math.max(
-    savedCommunityStats?.failedOrders || 0,
-    derivedOrderTotals.no
-  ),
-  updatedAt:
-    savedCommunityStats?.updatedAt || derivedOrderTotals.updatedAt || null,
-};
-persistCommunityStats();
-
-function computeCommunityTracker() {
-  const promosPending = Math.max(
-    0,
-    communityStats.promosRedeemed - communityStats.promosRefundConfirmed
-  );
-  const promosConfirmed = Math.max(0, communityStats.promosRefundConfirmed);
-  return {
-    promosRedeemed: communityStats.promosRedeemed,
-    promosPending,
-    promosRefundConfirmed: promosConfirmed,
-    pendingCreditsDollars: promosPending * PZ_PROMO_VALUE_DOLLARS,
-    confirmedCreditsDollars: promosConfirmed * PZ_PROMO_VALUE_DOLLARS,
-    promoValueDollars: PZ_PROMO_VALUE_DOLLARS,
-    updatedAt: communityStats.updatedAt,
-  };
-}
-
-const promoRefundDedupe = new Set();
-
-function loadPromoRefundDedupeFromDisk() {
-  if (!fs.existsSync(PROMO_REFUND_REPORTS_PATH)) return;
-  const raw = fs.readFileSync(PROMO_REFUND_REPORTS_PATH, "utf8");
-  const lines = raw.split(/\r?\n/).filter(Boolean);
-  for (const line of lines) {
-    try {
-      const r = JSON.parse(line);
-      const userId = r?.userId;
-      const cardId = r?.cardId;
-      const receivedAt = r?.receivedAt;
-      if (!userId || !cardId || !receivedAt) continue;
-      promoRefundDedupe.add(`${userId}|${cardId}|${receivedAt}`);
-    } catch {
-      // ignore corrupted lines
-    }
-  }
-}
-
-loadPromoRefundDedupeFromDisk();
-
-function loadUserCardsStore() {
-  if (!fs.existsSync(USER_CARDS_PATH)) return {};
-  try {
-    const raw = fs.readFileSync(USER_CARDS_PATH, "utf8");
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === "object" ? parsed : {};
-  } catch {
-    return {};
-  }
-}
-
-let userCardsStore = loadUserCardsStore();
-
-function persistUserCardsStore() {
-  fs.writeFileSync(USER_CARDS_PATH, JSON.stringify(userCardsStore, null, 2));
-}
-
-function todayLocalDateKey(date = new Date()) {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, "0");
-  const d = String(date.getDate()).padStart(2, "0");
-  return `${y}-${m}-${d}`;
-}
-
-function normalizePromoUses(uses) {
-  if (!Array.isArray(uses)) return [];
-  return uses
-    .filter((u) => u && typeof u === "object")
-    .map((u) => ({
-      id: String(u.id || randomUUID()),
-      promoNumber: Math.max(1, Math.min(10, Number(u.promoNumber) || 1)),
-      usedAt: String(u.usedAt || todayLocalDateKey()),
-      receivedAt: u.receivedAt ? String(u.receivedAt) : null,
-      placeId: u.placeId ? String(u.placeId) : null,
-      createdAt: String(u.createdAt || new Date().toISOString()),
-    }))
-    .sort((a, b) => b.promoNumber - a.promoNumber || String(a.usedAt).localeCompare(String(b.usedAt)));
-}
-
-function normalizeCard(card) {
-  const remainingCount = Math.max(0, Math.min(10, Number(card?.remainingCount ?? 10)));
-  return {
-    ...card,
-    remainingCount,
-    uses: normalizePromoUses(card?.uses),
-  };
-}
-
-function getUserCardsList(userId) {
-  const cards = Array.isArray(userCardsStore[userId]) ? userCardsStore[userId] : [];
-  return cards.map(normalizeCard);
-}
-
-function setUserCardsList(userId, cards) {
-  userCardsStore[userId] = cards.map(normalizeCard);
-  persistUserCardsStore();
-  return userCardsStore[userId];
-}
-
-function bumpCommunityRefundConfirmed(count = 1) {
-  communityStats.promosRefundConfirmed += Math.max(1, count);
-  communityStats.promosRefundConfirmed = Math.min(
-    communityStats.promosRefundConfirmed,
-    communityStats.promosRedeemed
-  );
-  communityStats.updatedAt = new Date().toISOString();
-  persistCommunityStats();
-}
-
 function readJsonBody(req) {
   return new Promise((resolve, reject) => {
     let body = "";
     req.on("data", (chunk) => {
       body += chunk;
-      // Basic guard to prevent huge payloads.
       if (body.length > 1_000_000) {
         reject(new Error("Request body too large"));
       }
@@ -330,7 +129,7 @@ function readJsonBody(req) {
       if (!body) return resolve({});
       try {
         resolve(JSON.parse(body));
-      } catch (e) {
+      } catch {
         reject(new Error("Invalid JSON body"));
       }
     });
@@ -352,14 +151,11 @@ async function requireClerkUser(req) {
     throw Object.assign(new Error("Clerk secret not configured"), { statusCode: 503 });
   }
 
-  const verifyOptions = {
-    authorizedParties: [APP_ORIGIN],
-  };
+  const verifyOptions = { authorizedParties: [APP_ORIGIN] };
   if (CLERK_JWT_KEY) verifyOptions.jwtKey = CLERK_JWT_KEY;
   else verifyOptions.secretKey = CLERK_SECRET_KEY;
 
   const verified = await verifyToken(token, verifyOptions);
-
   const userId = verified?.sub;
   if (!userId) {
     throw Object.assign(new Error("Invalid token"), { statusCode: 401 });
@@ -383,13 +179,19 @@ const server = http.createServer(async (req, res) => {
     const apiKey = getGoogleApiKey();
 
     if (req.url?.startsWith("/api/config")) {
-      sendJson(res, 200, {
-        clerk: {
-          enabled: Boolean(CLERK_PUBLISHABLE_KEY && CLERK_FRONTEND_API),
-          publishableKey: CLERK_PUBLISHABLE_KEY,
-          frontendApi: CLERK_FRONTEND_API,
+      sendJson(
+        res,
+        200,
+        {
+          clerk: {
+            enabled: Boolean(CLERK_PUBLISHABLE_KEY && CLERK_FRONTEND_API),
+            publishableKey: CLERK_PUBLISHABLE_KEY,
+            frontendApi: CLERK_FRONTEND_API,
+          },
+          dataStore: usesPostgres() ? "postgres" : "json",
         },
-      }, 0);
+        0
+      );
       return;
     }
 
@@ -410,48 +212,20 @@ const server = http.createServer(async (req, res) => {
         return;
       }
 
-      const cards = getUserCardsList(userId);
-      const card = cards.find((c) => c.id === cardId);
-      if (!card) {
-        sendJson(res, 404, { error: "card_not_found" });
-        return;
+      try {
+        const result = await markPromoUseReceived(userId, {
+          cardId,
+          useId,
+          receivedAt,
+        });
+        sendJson(res, 200, { ok: true, ...result }, 0);
+      } catch (err) {
+        if (err?.statusCode) {
+          sendJson(res, err.statusCode, { error: err.message });
+          return;
+        }
+        throw err;
       }
-
-      const use = (card.uses || []).find((u) => u.id === useId);
-      if (!use) {
-        sendJson(res, 404, { error: "use_not_found" });
-        return;
-      }
-
-      if (!use.receivedAt) {
-        use.receivedAt = receivedAt;
-        setUserCardsList(userId, cards);
-        bumpCommunityRefundConfirmed(1);
-
-        fs.appendFileSync(
-          PROMO_REFUND_REPORTS_PATH,
-          JSON.stringify({
-            userId,
-            cardId,
-            useId,
-            receivedAt,
-            usedAt: use.usedAt,
-            promoNumber: use.promoNumber,
-            createdAt: new Date().toISOString(),
-          }) + "\n"
-        );
-      }
-
-      sendJson(
-        res,
-        200,
-        {
-          ok: true,
-          cards: getUserCardsList(userId),
-          community: computeCommunityTracker(),
-        },
-        0
-      );
       return;
     }
 
@@ -474,58 +248,25 @@ const server = http.createServer(async (req, res) => {
         return;
       }
 
-      const cards = getUserCardsList(userId);
-      let card = cardId
-        ? cards.find((c) => c.id === cardId)
-        : cards.find((c) => c.bankId === bankId && c.label === label);
-
-      if (!card) {
-        if (!bankId || !label) {
-          sendJson(res, 404, { error: "card_not_found" });
-          return;
-        }
-        card = {
-          id: randomUUID(),
+      try {
+        const result = await logPromoUse(userId, {
+          cardId: cardId || null,
           bankId,
           label,
-          remainingCount: 10,
-          uses: [],
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        };
-        cards.unshift(card);
+          placeId,
+          usedAt,
+        });
+        sendJson(res, 200, { ok: true, ...result }, 0);
+      } catch (err) {
+        if (err?.statusCode) {
+          sendJson(res, err.statusCode, {
+            error: err.message,
+            cards: err.cards,
+          });
+          return;
+        }
+        throw err;
       }
-
-      if (card.remainingCount <= 0) {
-        sendJson(res, 400, { error: "no_promos_left", cards });
-        return;
-      }
-
-      const promoNumber = card.remainingCount;
-      const use = {
-        id: randomUUID(),
-        promoNumber,
-        usedAt,
-        receivedAt: null,
-        placeId,
-        createdAt: new Date().toISOString(),
-      };
-      card.uses = normalizePromoUses([...(card.uses || []), use]);
-      card.remainingCount = Math.max(0, card.remainingCount - 1);
-      card.updatedAt = new Date().toISOString();
-      setUserCardsList(userId, cards);
-
-      sendJson(
-        res,
-        200,
-        {
-          ok: true,
-          cards: getUserCardsList(userId),
-          savedCardId: card.id,
-          use,
-        },
-        0
-      );
       return;
     }
 
@@ -533,7 +274,7 @@ const server = http.createServer(async (req, res) => {
       const { userId } = await requireClerkUser(req);
 
       if (req.method === "GET") {
-        sendJson(res, 200, { cards: getUserCardsList(userId) });
+        sendJson(res, 200, { cards: await getUserCards(userId) });
         return;
       }
 
@@ -542,29 +283,23 @@ const server = http.createServer(async (req, res) => {
         const bankId = String(body?.bankId || "").trim();
         const label = String(body?.label || "").trim();
         const id = body?.id ? String(body.id) : randomUUID();
-        const remainingCount = Math.max(0, Math.min(10, Number(body?.remainingCount ?? 10)));
+        const remainingCount = Math.max(
+          0,
+          Math.min(10, Number(body?.remainingCount ?? 10))
+        );
 
         if (!bankId || !label) {
           sendJson(res, 400, { error: "missing_card_fields" });
           return;
         }
 
-        const cards = getUserCardsList(userId);
-        const index = cards.findIndex((c) => c.id === id);
-        const existing = index >= 0 ? cards[index] : null;
-        const next = {
+        const result = await upsertUserCard(userId, {
           id,
           bankId,
           label,
           remainingCount,
-          uses: normalizePromoUses(body?.uses ?? existing?.uses ?? []),
-          updatedAt: new Date().toISOString(),
-          createdAt: existing?.createdAt || new Date().toISOString(),
-        };
-        if (index >= 0) cards[index] = next;
-        else cards.unshift(next);
-        setUserCardsList(userId, cards);
-        sendJson(res, 200, { cards: getUserCardsList(userId), savedCardId: id });
+        });
+        sendJson(res, 200, result);
         return;
       }
 
@@ -573,7 +308,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.url?.startsWith("/api/community-stats")) {
-      sendJson(res, 200, computeCommunityTracker(), 15);
+      sendJson(res, 200, await getCommunityTracker(), 15);
       return;
     }
 
@@ -584,61 +319,8 @@ const server = http.createServer(async (req, res) => {
       }
       const body = await readJsonBody(req).catch(() => ({}));
       const count = Math.max(1, Math.min(10, Number(body?.count) || 1));
-      communityStats.promosRedeemed += count;
-      communityStats.promosRefundConfirmed = Math.min(
-        communityStats.promosRefundConfirmed,
-        communityStats.promosRedeemed
-      );
-      communityStats.updatedAt = new Date().toISOString();
-      persistCommunityStats();
-      sendJson(res, 200, { ok: true, ...computeCommunityTracker() }, 0);
-      return;
-    }
-
-    if (req.url?.startsWith("/api/promo-refund-confirm")) {
-      if (req.method !== "POST") {
-        sendJson(res, 405, { error: "method_not_allowed" });
-        return;
-      }
-
-      const { userId } = await requireClerkUser(req);
-      const body = await readJsonBody(req).catch(() => ({}));
-      const cardId = String(body?.cardId || "").trim();
-      const receivedAt = String(body?.receivedAt || "").trim();
-      const count = Math.max(1, Math.min(10, Number(body?.count) || 1));
-
-      if (!cardId || !receivedAt) {
-        sendJson(res, 400, { error: "missing_fields" });
-        return;
-      }
-
-      const dedupeKeyBase = `${userId}|${cardId}|${receivedAt}`;
-      if (promoRefundDedupe.has(dedupeKeyBase)) {
-        sendJson(res, 200, { ok: true, ...computeCommunityTracker(), deduped: true }, 0);
-        return;
-      }
-
-      promoRefundDedupe.add(dedupeKeyBase);
-      fs.appendFileSync(
-        PROMO_REFUND_REPORTS_PATH,
-        JSON.stringify({
-          userId,
-          cardId,
-          receivedAt,
-          count,
-          createdAt: new Date().toISOString(),
-        }) + "\n"
-      );
-
-      communityStats.promosRefundConfirmed += count;
-      communityStats.promosRefundConfirmed = Math.min(
-        communityStats.promosRefundConfirmed,
-        communityStats.promosRedeemed
-      );
-      communityStats.updatedAt = new Date().toISOString();
-      persistCommunityStats();
-
-      sendJson(res, 200, { ok: true, ...computeCommunityTracker() }, 0);
+      const community = await bumpPromoRedeemed(count);
+      sendJson(res, 200, { ok: true, ...community }, 0);
       return;
     }
 
@@ -649,21 +331,7 @@ const server = http.createServer(async (req, res) => {
         sendJson(res, 400, { error: "missing_placeId", yes: 0, no: 0, total: 0 });
         return;
       }
-      const s = orderStatsByPlaceId.get(placeId) || {
-        yes: 0,
-        no: 0,
-        lastReportedAt: null,
-      };
-      const total = s.yes + s.no;
-      const payload = {
-        placeId,
-        yes: s.yes,
-        no: s.no,
-        total,
-        successRate: total ? s.yes / total : null,
-        lastReportedAt: s.lastReportedAt,
-      };
-      sendJson(res, 200, payload);
+      sendJson(res, 200, await getPlaceOrderStats(placeId));
       return;
     }
 
@@ -675,55 +343,21 @@ const server = http.createServer(async (req, res) => {
 
       const body = await readJsonBody(req);
       const placeId = body?.placeId;
-      const orderingUrl = body?.orderingUrl;
-      const success = !!body?.success;
-      const createdAt = body?.createdAt || new Date().toISOString();
-
       if (!placeId) {
         sendJson(res, 400, { error: "missing_placeId" });
         return;
       }
 
-      const s = orderStatsByPlaceId.get(placeId) || {
-        yes: 0,
-        no: 0,
-        lastReportedAt: null,
-      };
-      if (success) {
-        s.yes += 1;
-        communityStats.successfulOrders += 1;
-        communityStats.promosRedeemed += 1;
-        communityStats.promosRefundConfirmed = Math.min(
-          communityStats.promosRefundConfirmed,
-          communityStats.promosRedeemed
-        );
-      } else {
-        s.no += 1;
-        communityStats.failedOrders += 1;
-      }
-      s.lastReportedAt = createdAt;
-      orderStatsByPlaceId.set(placeId, s);
-      communityStats.updatedAt = createdAt;
-      persistCommunityStats();
-
-      // Persist for later server restarts.
-      const reportLine = JSON.stringify({
+      const result = await recordOrderReport({
         placeId,
-        orderingUrl: orderingUrl || "",
-        success,
+        orderingUrl: body?.orderingUrl,
+        success: !!body?.success,
         cardInstitution: body?.cardInstitution ?? null,
         cardLabel: body?.cardLabel ?? null,
-        createdAt,
+        createdAt: body?.createdAt || new Date().toISOString(),
       });
-      fs.appendFileSync(ORDER_REPORTS_PATH, reportLine + "\n");
 
-      sendJson(res, 200, {
-        ok: true,
-        yes: s.yes,
-        no: s.no,
-        total: s.yes + s.no,
-        community: computeCommunityTracker(),
-      }, 0);
+      sendJson(res, 200, { ok: true, ...result }, 0);
       return;
     }
 
@@ -800,16 +434,23 @@ const server = http.createServer(async (req, res) => {
     console.error(err);
     if (req.url?.startsWith("/api/")) {
       const statusCode = err?.statusCode || 500;
-      sendJson(res, statusCode, { error: "server_error", message: String(err?.message || err), all: [] });
+      sendJson(res, statusCode, {
+        error: "server_error",
+        message: String(err?.message || err),
+        all: [],
+      });
     } else {
       res.writeHead(500).end("Server error");
     }
   }
 });
 
+await initStore();
+
 server.listen(PORT, () => {
   const key = getGoogleApiKey();
   console.log(`pazetracker http://localhost:${PORT}`);
+  console.log(`data store: ${usesPostgres() ? "postgres" : "json"}`);
   if (!key) {
     console.warn("GOOGLE_MAPS_API_KEY not set — place photos will not load.");
   }
