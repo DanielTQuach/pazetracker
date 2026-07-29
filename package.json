@@ -4,10 +4,12 @@
   "private": true,
   "description": "MapLibre map of US Clover merchants (Paze checkout)",
   "dependencies": {
-    "@clerk/backend": "^1.24.3"
+    "@clerk/backend": "^1.24.3",
+    "pg": "^8.22.0"
   },
   "scripts": {
     "start": "node server.mjs",
-    "fetch-data": "node scripts/fetch-data.mjs"
+    "fetch-data": "node scripts/fetch-data.mjs",
+    "db:migrate": "node scripts/migrate.mjs"
   }
 }
