@@ -41,7 +41,9 @@ body {
   z-index: 1003;
   left: 12px;
   top: 12px;
-  padding: 0.6rem 0.7rem;
+  padding: 0.55rem;
+  width: 42px;
+  height: 42px;
   border-radius: 10px;
   border: 1px solid var(--line);
   background: rgba(255, 255, 255, 0.78);
@@ -50,6 +52,26 @@ body {
   font-weight: 900;
   cursor: pointer;
   backdrop-filter: blur(6px);
+}
+
+.sidebar-toggle .hamburger {
+  display: block;
+  width: 18px;
+  height: 12px;
+  position: relative;
+  margin: 0 auto;
+}
+
+.sidebar-toggle .hamburger::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  border-radius: 2px;
+  top: 0;
+  background: var(--ink);
+  box-shadow: 0 5px 0 var(--ink), 0 10px 0 var(--ink);
 }
 
 .sidebar-backdrop {
