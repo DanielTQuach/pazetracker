@@ -5,10 +5,48 @@ MapLibre GL JS map of ~28k US Clover merchants (restaurants, cafes, retail, etc.
 ## Quick start
 
 ```bash
+cp .env.example .env
+npm install
 npm start
 ```
 
 Open [http://localhost:5173](http://localhost:5173).
+
+## Environment
+
+### Google Places
+
+Used for popup photos, search result thumbnails, and ratings.
+
+- `GOOGLE_MAPS_API_KEY`
+- Enable **Places API (New)**
+
+### Clerk
+
+Used for **optional sign-in** and **synced card tracking across devices**.
+
+- `CLERK_PUBLISHABLE_KEY`
+- `CLERK_FRONTEND_API`
+- `CLERK_JWT_KEY`
+- `APP_ORIGIN=http://localhost:5173`
+
+The card tracker is manual only:
+
+- users choose from the supported bank list
+- users type a card label like `Chase debit`
+- users set remaining promos from `0` to `10`
+- no bank connection, no payment details, no real card numbers
+
+## Synced cards
+
+When signed in, users can:
+
+- add named tracker cards
+- choose a bank and see a wallet-style virtual card tile
+- set how many promos remain (`0-10`)
+- come back on another device and see the same saved cards
+
+If Clerk is not configured, the auth section stays disabled gracefully.
 
 ## Data
 
@@ -23,5 +61,6 @@ npm run fetch-data
 ## Notes
 
 - Basemap: [OpenFreeMap](https://openfreemap.org/) (no API key)
-- Points are clustered; click a pin for address + Clover ordering link
-- Filters: search, business type, gift cards, accepting online orders
+- Points are clustered; click a pin for Google photo gallery, address, and Clover ordering link
+- Search results can show Google thumbnails + ratings
+- Crowd order reports are stored separately from synced user cards
