@@ -195,25 +195,6 @@ body {
   font-size: 1.25rem;
 }
 
-.refund-report {
-  margin-top: 0.9rem;
-  padding-top: 0.75rem;
-  border-top: 1px dashed var(--line);
-}
-
-.refund-report-title {
-  margin: 0 0 0.55rem;
-  font-weight: 900;
-  color: var(--ink);
-}
-
-.refund-report-copy {
-  margin: 0.4rem 0 0;
-  color: var(--muted);
-  font-size: 0.78rem;
-  line-height: 1.35;
-}
-
 .field {
   display: grid;
   gap: 0.35rem;
@@ -347,12 +328,23 @@ body {
   background: #fff;
   padding: 0.75rem;
   text-align: left;
-  cursor: pointer;
 }
 
 .saved-card.is-selected {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px rgba(15, 107, 92, 0.18);
+}
+
+.saved-card-select {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
 }
 
 .saved-card-top {
@@ -374,6 +366,100 @@ body {
 .saved-card-remaining {
   display: block;
   color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.saved-card-actions {
+  display: flex;
+  gap: 0.45rem;
+  margin-top: 0.7rem;
+}
+
+.saved-card-actions .btn {
+  flex: 1;
+  padding: 0.45rem 0.55rem;
+  font-size: 0.82rem;
+}
+
+.history-modal-card {
+  max-height: min(80vh, 720px);
+  overflow: auto;
+}
+
+.history-list {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.history-row {
+  display: grid;
+  grid-template-columns: 54px 1fr auto;
+  gap: 0.7rem;
+  align-items: center;
+  padding: 0.7rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+}
+
+.history-promo-num {
+  width: 54px;
+  height: 40px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 900;
+  color: #fff;
+  background: linear-gradient(135deg, var(--accent), #1d3a35);
+}
+
+.history-meta {
+  min-width: 0;
+}
+
+.history-meta strong {
+  display: block;
+  font-size: 0.9rem;
+}
+
+.history-meta span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.78rem;
+  margin-top: 0.15rem;
+}
+
+.history-actions {
+  display: grid;
+  gap: 0.35rem;
+  min-width: 120px;
+}
+
+.history-actions .btn {
+  flex: 0;
+  padding: 0.4rem 0.5rem;
+  font-size: 0.78rem;
+}
+
+.history-actions input[type="date"] {
+  width: 100%;
+  padding: 0.3rem 0.35rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font: inherit;
+  font-size: 0.75rem;
+}
+
+.history-empty {
+  margin: 0.4rem 0 0;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.history-status-received {
+  color: var(--accent);
+  font-weight: 800;
   font-size: 0.8rem;
 }
 

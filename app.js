@@ -42,8 +42,12 @@ const cardsEmptyEl = document.getElementById("cardsEmpty");
 const sidebarBankGridEl = document.getElementById("sidebarBankGrid");
 const sidebarCardLabelEl = document.getElementById("sidebarCardLabel");
 const sidebarCardRemainingEl = document.getElementById("sidebarCardRemaining");
-const refundReceivedDateEl = document.getElementById("refundReceivedDate");
-const confirmRefundBtnEl = document.getElementById("confirmRefundBtn");
+const historyModalEl = document.getElementById("historyModal");
+const historyModalTitleEl = document.getElementById("historyModalTitle");
+const historyListEl = document.getElementById("historyList");
+const historyEmptyEl = document.getElementById("historyEmpty");
+
+let historyCardId = null;
 
 let allFeatures = [];
 let popup = new maplibregl.Popup({
@@ -283,44 +287,157 @@ function resetCardForm() {
   selectedSidebarBankId = BANKS[0]?.id || "";
   if (sidebarCardLabelEl) sidebarCardLabelEl.value = "";
   if (sidebarCardRemainingEl) sidebarCardRemainingEl.value = "10";
-  if (refundReceivedDateEl) refundReceivedDateEl.value = "";
   renderSidebarBankChoices();
   renderSyncedCards();
-  updateRefundReportUi();
 }
 
-function updateRefundReportUi() {
-  if (!confirmRefundBtnEl) return;
-  confirmRefundBtnEl.disabled = !selectedSyncedCardId;
+function todayLocalDateKey(date = new Date()) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
 }
 
-confirmRefundBtnEl?.addEventListener("click", async () => {
-  if (!selectedSyncedCardId) {
-    alert("Select a card first.");
-    return;
+function formatDisplayDate(value) {
+  if (!value) return "-";
+  const [y, m, d] = String(value).split("-");
+  if (!y || !m || !d) return String(value);
+  return `${m}/${d}/${y}`;
+}
+
+function getCardUses(card) {
+  return Array.isArray(card?.uses) ? [...card.uses] : [];
+}
+
+async function logSyncedPromoUse({ bankId, label, cardId = null, placeId = null }) {
+  const res = await authedFetch("/api/user-cards/use", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      cardId,
+      bankId,
+      label,
+      placeId,
+      usedAt: todayLocalDateKey(),
+    }),
+  });
+  if (!res.ok) {
+    const txt = await res.text().catch(() => "");
+    throw new Error(`Failed to log promo use (${res.status}) ${txt}`);
   }
-  const receivedAt = (refundReceivedDateEl?.value || "").trim();
-  if (!receivedAt) {
-    alert("Pick the received date first.");
+  const data = await res.json();
+  syncedCards = Array.isArray(data.cards) ? data.cards : syncedCards;
+  if (data.savedCardId) selectedSyncedCardId = data.savedCardId;
+  renderSyncedCards();
+  return data;
+}
+
+async function markPromoUseReceived(cardId, useId, receivedAt) {
+  const res = await authedFetch("/api/user-cards/use/receive", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      cardId,
+      useId,
+      receivedAt: receivedAt || todayLocalDateKey(),
+    }),
+  });
+  if (!res.ok) {
+    const txt = await res.text().catch(() => "");
+    throw new Error(`Failed to mark received (${res.status}) ${txt}`);
+  }
+  const data = await res.json();
+  syncedCards = Array.isArray(data.cards) ? data.cards : syncedCards;
+  if (data.community) renderCommunityStats(data.community);
+  renderSyncedCards();
+  if (historyCardId === cardId) renderHistoryModal(cardId);
+  return data;
+}
+
+function closeHistoryModal() {
+  if (!historyModalEl) return;
+  historyModalEl.hidden = true;
+  historyModalEl.setAttribute("aria-hidden", "true");
+  historyCardId = null;
+}
+
+function openHistoryModal(cardId) {
+  if (!historyModalEl) return;
+  historyCardId = cardId;
+  historyModalEl.hidden = false;
+  historyModalEl.setAttribute("aria-hidden", "false");
+  renderHistoryModal(cardId);
+}
+
+function renderHistoryModal(cardId) {
+  if (!historyListEl || !historyEmptyEl) return;
+  const card = syncedCards.find((c) => c.id === cardId);
+  if (!card) {
+    closeHistoryModal();
     return;
   }
 
-  try {
-    const res = await authedFetch("/api/promo-refund-confirm", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ cardId: selectedSyncedCardId, receivedAt, count: 1 }),
-    });
-    if (!res.ok) {
-      const txt = await res.text().catch(() => "");
-      throw new Error(`Confirm returned credit failed (${res.status}) ${txt}`);
+  const bank = getBankById(card.bankId);
+  if (historyModalTitleEl) {
+    historyModalTitleEl.textContent = `${card.label} · ${bank.name}`;
+  }
+
+  const uses = getCardUses(card).sort(
+    (a, b) => b.promoNumber - a.promoNumber || String(a.usedAt).localeCompare(String(b.usedAt))
+  );
+  historyListEl.innerHTML = "";
+  historyEmptyEl.hidden = uses.length > 0;
+
+  for (const use of uses) {
+    const row = document.createElement("div");
+    row.className = "history-row";
+    const received = !!use.receivedAt;
+    row.innerHTML = `
+      <div class="history-promo-num">#${escapeHtml(use.promoNumber)}</div>
+      <div class="history-meta">
+        <strong>Used ${escapeHtml(formatDisplayDate(use.usedAt))}</strong>
+        <span>${
+          received
+            ? `Credit received ${escapeHtml(formatDisplayDate(use.receivedAt))}`
+            : "Credit pending"
+        }</span>
+      </div>
+      <div class="history-actions"></div>
+    `;
+
+    const actions = row.querySelector(".history-actions");
+    if (received) {
+      const status = document.createElement("div");
+      status.className = "history-status-received";
+      status.textContent = "Received";
+      actions.appendChild(status);
+    } else {
+      const dateInput = document.createElement("input");
+      dateInput.type = "date";
+      dateInput.value = todayLocalDateKey();
+      dateInput.setAttribute("aria-label", `Received date for promo ${use.promoNumber}`);
+
+      const markBtn = document.createElement("button");
+      markBtn.type = "button";
+      markBtn.className = "btn";
+      markBtn.textContent = "Mark received";
+      markBtn.addEventListener("click", async () => {
+        try {
+          markBtn.disabled = true;
+          await markPromoUseReceived(card.id, use.id, dateInput.value || todayLocalDateKey());
+        } catch (err) {
+          alert(String(err?.message || err));
+          markBtn.disabled = false;
+        }
+      });
+
+      actions.appendChild(dateInput);
+      actions.appendChild(markBtn);
     }
-    if (refundReceivedDateEl) refundReceivedDateEl.value = "";
-    await loadCommunityStats();
-  } catch (err) {
-    alert(String(err?.message || err));
+
+    historyListEl.appendChild(row);
   }
-});
+}
 
 function findCard(cards, bankId, label) {
   const normalized = String(label || "").trim();
@@ -329,6 +446,10 @@ function findCard(cards, bankId, label) {
 }
 
 function getRemainingPlays(bankId, label) {
+  if (authState.user) {
+    const synced = findCard(syncedCards, bankId, label);
+    if (synced) return clampRemaining(synced.remainingCount);
+  }
   const cards = getUserCards();
   const card = findCard(cards, bankId, label);
   const used = card?.usedCount || 0;
@@ -418,31 +539,44 @@ function renderSyncedCards() {
 
   for (const card of syncedCards) {
     const bank = getBankById(card.bankId);
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "saved-card";
-    if (card.id === selectedSyncedCardId) btn.classList.add("is-selected");
-    btn.innerHTML = `
-      <div class="saved-card-top">
-        <div class="order-bank-simulated-card">${bankShortHtml(bank.short)}</div>
-        <div class="saved-card-copy">
-          <span class="saved-card-label">${escapeHtml(card.label)}</span>
-          <span class="saved-card-bank">${escapeHtml(bank.name)}</span>
-          <span class="saved-card-remaining">${clampRemaining(card.remainingCount)}/10 promos left</span>
+    const uses = getCardUses(card);
+    const pendingCredits = uses.filter((u) => !u.receivedAt).length;
+    const item = document.createElement("div");
+    item.className = "saved-card";
+    if (card.id === selectedSyncedCardId) item.classList.add("is-selected");
+    item.innerHTML = `
+      <button type="button" class="saved-card-select" aria-label="Select ${escapeHtml(card.label)}">
+        <div class="saved-card-top">
+          <div class="order-bank-simulated-card">${bankShortHtml(bank.short)}</div>
+          <div class="saved-card-copy">
+            <span class="saved-card-label">${escapeHtml(card.label)}</span>
+            <span class="saved-card-bank">${escapeHtml(bank.name)}</span>
+            <span class="saved-card-remaining">${clampRemaining(card.remainingCount)}/10 promos left${
+              pendingCredits ? ` · ${pendingCredits} pending credit${pendingCredits === 1 ? "" : "s"}` : ""
+            }</span>
+          </div>
         </div>
+      </button>
+      <div class="saved-card-actions">
+        <button type="button" class="btn btn-ghost history-btn">History</button>
       </div>
     `;
-    btn.addEventListener("click", () => {
+
+    item.querySelector(".saved-card-select")?.addEventListener("click", () => {
       selectedSyncedCardId = card.id;
       selectedSidebarBankId = card.bankId;
       if (sidebarCardLabelEl) sidebarCardLabelEl.value = card.label;
       if (sidebarCardRemainingEl) sidebarCardRemainingEl.value = String(clampRemaining(card.remainingCount));
-      if (refundReceivedDateEl) refundReceivedDateEl.value = "";
       renderSidebarBankChoices();
       renderSyncedCards();
-      updateRefundReportUi();
     });
-    cardsListEl.appendChild(btn);
+
+    item.querySelector(".history-btn")?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      openHistoryModal(card.id);
+    });
+
+    cardsListEl.appendChild(item);
   }
 }
 
@@ -588,18 +722,28 @@ function wireOrderModalUi() {
       return;
     }
 
-    // Update user-local remaining counter (no payment details stored).
-    const cards = getUserCards();
-    let card = findCard(cards, selectedBankId, label);
-    if (!card) {
-      card = { bankId: selectedBankId, label, usedCount: 0 };
-      cards.push(card);
-    }
-    card.usedCount = (card.usedCount || 0) + 1;
-    setUserCards(cards);
-    updateRemaining();
-
     try {
+      if (authState.user) {
+        const matched = findCard(syncedCards, selectedBankId, label);
+        await logSyncedPromoUse({
+          cardId: matched?.id || null,
+          bankId: selectedBankId,
+          label,
+          placeId: p.placeId,
+        });
+      } else {
+        // Guest fallback: local remaining counter only.
+        const cards = getUserCards();
+        let card = findCard(cards, selectedBankId, label);
+        if (!card) {
+          card = { bankId: selectedBankId, label, usedCount: 0 };
+          cards.push(card);
+        }
+        card.usedCount = (card.usedCount || 0) + 1;
+        setUserCards(cards);
+      }
+      updateRemaining();
+
       if (!hasSubmittedOrderReportToday(p.placeId)) {
         await submitOrderReport({
           placeId: p.placeId,
@@ -624,6 +768,16 @@ function wireOrderModalUi() {
 
   orderCardLabelEl.addEventListener("input", () => updateRemaining());
 }
+
+document.getElementById("historyModalClose")?.addEventListener("click", () => closeHistoryModal());
+historyModalEl?.addEventListener("click", (e) => {
+  if (e.target === historyModalEl) closeHistoryModal();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && historyModalEl && !historyModalEl.hidden) {
+    closeHistoryModal();
+  }
+});
 
 function safeDomId(placeId) {
   return `community_${placeId.replace(/[^a-zA-Z0-9_-]/g, "_")}`;

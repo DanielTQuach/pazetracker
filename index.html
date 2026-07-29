@@ -137,23 +137,6 @@
 
             <div id="cardsEmpty" class="cards-empty">No synced cards yet.</div>
             <div id="cardsList" class="cards-list"></div>
-
-            <div class="refund-report" aria-label="Report returned credit">
-              <div class="refund-report-title">Report credit returned</div>
-
-              <label class="field">
-                <span>Received date</span>
-                <input id="refundReceivedDate" type="date" />
-              </label>
-
-              <button type="button" id="confirmRefundBtn" class="btn btn-ghost" disabled>
-                Confirm returned credit
-              </button>
-
-              <p class="refund-report-copy">
-                Helps the community track how long the $10 credit takes to arrive.
-              </p>
-            </div>
           </div>
         </section>
 
@@ -244,6 +227,36 @@
             <button id="orderDoneBtn" type="button" class="btn">Done</button>
           </div>
         </section>
+      </div>
+    </div>
+
+    <div id="historyModal" class="order-modal" hidden aria-hidden="true">
+      <div
+        class="order-modal-card history-modal-card"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Promo history"
+      >
+        <button
+          id="historyModalClose"
+          type="button"
+          class="order-modal-close"
+          aria-label="Close"
+        >
+          X
+        </button>
+
+        <header class="order-modal-header">
+          <h2 id="historyModalTitle">Promo history</h2>
+          <p id="historyModalSubtitle" class="order-modal-subtitle">
+            Promo #10 is the earliest use. Mark each credit when it posts.
+          </p>
+        </header>
+
+        <div id="historyList" class="history-list"></div>
+        <p id="historyEmpty" class="history-empty" hidden>
+          No promo uses logged for this card yet.
+        </p>
       </div>
     </div>
 
