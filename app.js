@@ -172,7 +172,7 @@ async function initClerk() {
   authState.config = await fetchAppConfig();
   const clerkConfig = authState.config?.clerk || {};
   if (!clerkConfig.enabled) {
-    authStatusEl.textContent = "Sign-in is not configured yet. Cards stay local until Clerk is set up.";
+    authStatusEl.textContent = "";
     authActionsEl.hidden = true;
     userSummaryEl.hidden = true;
     cardManagerEl.hidden = true;
