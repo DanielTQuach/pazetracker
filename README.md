@@ -62,6 +62,21 @@ If Clerk is not configured, the auth section stays disabled gracefully.
 
 Everyone can see a public **community promos redeemed** count. It increases when someone reports a successful Clover order after opening ordering from the map. This is crowdsourced and in good faith.
 
+## Postgres (Railway)
+
+Without `DATABASE_URL`, synced cards, order reports, and community stats use local JSON/ndjson under `data/`. For production (e.g. Railway Postgres), set:
+
+- `DATABASE_URL` — connection string from Railway
+- `DATABASE_SSL=false` — only if your local Postgres has no SSL (remote Railway URLs use SSL by default)
+
+Apply the schema once:
+
+```bash
+npm run db:migrate
+```
+
+Schema lives in `db/schema.sql`. The server picks Postgres automatically when `DATABASE_URL` is set (`/api/config` reports `dataStore: "postgres"`).
+
 ## Data
 
 Local snapshot lives in `data/clover-merchants.geojson` (~26.5k restaurants + ~1.5k other businesses). The file is generated locally and not committed.
