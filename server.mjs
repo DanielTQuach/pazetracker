@@ -2,6 +2,8 @@ import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { randomUUID } from "node:crypto";
+import { verifyToken } from "@clerk/backend";
 import {
   fetchGooglePhotoBytes,
   getGoogleApiKey,
@@ -47,6 +49,12 @@ function loadEnvFile() {
 
 loadEnvFile();
 
+const APP_ORIGIN =
+  process.env.APP_ORIGIN || `http://localhost:${PORT}`;
+const CLERK_PUBLISHABLE_KEY = process.env.CLERK_PUBLISHABLE_KEY || "";
+const CLERK_FRONTEND_API = process.env.CLERK_FRONTEND_API || "";
+const CLERK_JWT_KEY = process.env.CLERK_JWT_KEY || "";
+
 function sendJson(res, status, body, cacheSeconds = 300) {
   const payload = JSON.stringify(body);
   res.writeHead(status, {
@@ -82,8 +90,12 @@ const photoBytesCache = new Map();
 const CACHE_TTL_MS = 10 * 60 * 1000;
 const PHOTO_BYTES_TTL_MS = 24 * 60 * 60 * 1000;
 
+// -----------------------------
+// Order crowdsource reporting
+// -----------------------------
 const ORDER_REPORTS_PATH = path.join(ROOT, "data", "order-reports.ndjson");
 fs.mkdirSync(path.dirname(ORDER_REPORTS_PATH), { recursive: true });
+const USER_CARDS_PATH = path.join(ROOT, "data", "user-cards.json");
 
 /** @type {Map<string, { yes: number, no: number, lastReportedAt: string | null }>} */
 const orderStatsByPlaceId = new Map();
@@ -113,11 +125,29 @@ function loadOrderStatsFromDisk() {
 
 loadOrderStatsFromDisk();
 
+function loadUserCardsStore() {
+  if (!fs.existsSync(USER_CARDS_PATH)) return {};
+  try {
+    const raw = fs.readFileSync(USER_CARDS_PATH, "utf8");
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+let userCardsStore = loadUserCardsStore();
+
+function persistUserCardsStore() {
+  fs.writeFileSync(USER_CARDS_PATH, JSON.stringify(userCardsStore, null, 2));
+}
+
 function readJsonBody(req) {
   return new Promise((resolve, reject) => {
     let body = "";
     req.on("data", (chunk) => {
       body += chunk;
+      // Basic guard to prevent huge payloads.
       if (body.length > 1_000_000) {
         reject(new Error("Request body too large"));
       }
@@ -131,6 +161,33 @@ function readJsonBody(req) {
       }
     });
   });
+}
+
+function getBearerToken(req) {
+  const auth = req.headers.authorization || "";
+  if (!auth.startsWith("Bearer ")) return null;
+  return auth.slice("Bearer ".length).trim();
+}
+
+async function requireClerkUser(req) {
+  const token = getBearerToken(req);
+  if (!token) {
+    throw Object.assign(new Error("Missing token"), { statusCode: 401 });
+  }
+  if (!CLERK_JWT_KEY) {
+    throw Object.assign(new Error("CLERK_JWT_KEY not configured"), { statusCode: 503 });
+  }
+
+  const verified = await verifyToken(token, {
+    jwtKey: CLERK_JWT_KEY,
+    authorizedParties: [APP_ORIGIN],
+  });
+
+  const userId = verified?.sub;
+  if (!userId) {
+    throw Object.assign(new Error("Invalid token"), { statusCode: 401 });
+  }
+  return { userId, session: verified };
 }
 
 function placeCacheKey(params) {
@@ -148,6 +205,60 @@ const server = http.createServer(async (req, res) => {
   try {
     const apiKey = getGoogleApiKey();
 
+    if (req.url?.startsWith("/api/config")) {
+      sendJson(res, 200, {
+        clerk: {
+          enabled: Boolean(CLERK_PUBLISHABLE_KEY && CLERK_FRONTEND_API),
+          publishableKey: CLERK_PUBLISHABLE_KEY,
+          frontendApi: CLERK_FRONTEND_API,
+        },
+      });
+      return;
+    }
+
+    if (req.url?.startsWith("/api/user-cards")) {
+      const { userId } = await requireClerkUser(req);
+
+      if (req.method === "GET") {
+        const cards = Array.isArray(userCardsStore[userId]) ? userCardsStore[userId] : [];
+        sendJson(res, 200, { cards });
+        return;
+      }
+
+      if (req.method === "POST") {
+        const body = await readJsonBody(req);
+        const bankId = String(body?.bankId || "").trim();
+        const label = String(body?.label || "").trim();
+        const id = body?.id ? String(body.id) : randomUUID();
+        const remainingCount = Math.max(0, Math.min(10, Number(body?.remainingCount ?? 10)));
+
+        if (!bankId || !label) {
+          sendJson(res, 400, { error: "missing_card_fields" });
+          return;
+        }
+
+        const cards = Array.isArray(userCardsStore[userId]) ? userCardsStore[userId] : [];
+        const index = cards.findIndex((c) => c.id === id);
+        const next = {
+          id,
+          bankId,
+          label,
+          remainingCount,
+          updatedAt: new Date().toISOString(),
+          createdAt: index >= 0 ? cards[index].createdAt : new Date().toISOString(),
+        };
+        if (index >= 0) cards[index] = next;
+        else cards.unshift(next);
+        userCardsStore[userId] = cards;
+        persistUserCardsStore();
+        sendJson(res, 200, { cards, savedCardId: id });
+        return;
+      }
+
+      sendJson(res, 405, { error: "method_not_allowed" });
+      return;
+    }
+
     if (req.url?.startsWith("/api/order-report-stats")) {
       const parsed = new URL(req.url, `http://localhost:${PORT}`);
       const placeId = parsed.searchParams.get("placeId") || "";
@@ -161,14 +272,15 @@ const server = http.createServer(async (req, res) => {
         lastReportedAt: null,
       };
       const total = s.yes + s.no;
-      sendJson(res, 200, {
+      const payload = {
         placeId,
         yes: s.yes,
         no: s.no,
         total,
         successRate: total ? s.yes / total : null,
         lastReportedAt: s.lastReportedAt,
-      });
+      };
+      sendJson(res, 200, payload);
       return;
     }
 
@@ -199,6 +311,7 @@ const server = http.createServer(async (req, res) => {
       s.lastReportedAt = createdAt;
       orderStatsByPlaceId.set(placeId, s);
 
+      // Persist for later server restarts.
       const reportLine = JSON.stringify({
         placeId,
         orderingUrl: orderingUrl || "",
@@ -281,20 +394,12 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    if (req.url?.startsWith("/api/")) {
-      sendJson(res, 404, { error: "not_found" });
-      return;
-    }
-
     serveStatic(req, res);
   } catch (err) {
     console.error(err);
     if (req.url?.startsWith("/api/")) {
-      sendJson(res, 500, {
-        error: "server_error",
-        message: String(err?.message || err),
-        all: [],
-      });
+      const statusCode = err?.statusCode || 500;
+      sendJson(res, statusCode, { error: "server_error", message: String(err?.message || err), all: [] });
     } else {
       res.writeHead(500).end("Server error");
     }
