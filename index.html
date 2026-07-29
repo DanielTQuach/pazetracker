@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>PazeTracker â€” Clover merchants map</title>
+    <title>PazeTracker - Clover merchants map</title>
     <link
       rel="stylesheet"
       href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css"
@@ -21,7 +21,7 @@
           </p>
         </header>
 
-        <div class="stat" id="stat">Loadingâ€¦</div>
+        <div class="stat" id="stat">Loading...</div>
 
         <label class="field">
           <span>Search</span>
@@ -41,11 +41,6 @@
         </label>
 
         <label class="check">
-          <input type="checkbox" id="giftCardOnly" />
-          <span>Gift card checkout only</span>
-        </label>
-
-        <label class="check">
           <input type="checkbox" id="acceptingOnly" />
           <span>Accepting online orders</span>
         </label>
@@ -57,6 +52,51 @@
 
         <ul id="results" class="results" hidden></ul>
 
+        <section class="sidebar-card" aria-label="Account">
+          <div class="sidebar-card-header">
+            <h2>Sync Cards</h2>
+            <p>Optional sign-in to keep your promo counts across devices.</p>
+          </div>
+
+          <div id="authStatus" class="auth-status">Checking auth...</div>
+
+          <div class="auth-actions" id="authActions">
+            <button type="button" id="signInBtn" class="btn">Sign in</button>
+            <button type="button" id="signUpBtn" class="btn btn-ghost">Sign up</button>
+          </div>
+
+          <div id="userSummary" class="user-summary" hidden>
+            <div id="userSummaryText" class="user-summary-text"></div>
+            <button type="button" id="signOutBtn" class="btn btn-ghost">Sign out</button>
+          </div>
+
+          <div id="cardManager" class="card-manager" hidden>
+            <p class="card-manager-copy">
+              Add a manual tracker card. This does not connect to your bank.
+            </p>
+
+            <div class="order-bank-grid" id="sidebarBankGrid" aria-label="Bank selector"></div>
+
+            <label class="field">
+              <span>Card label</span>
+              <input id="sidebarCardLabel" type="text" placeholder="e.g. Chase debit" autocomplete="off" />
+            </label>
+
+            <label class="field">
+              <span>Promos left</span>
+              <input id="sidebarCardRemaining" type="number" min="0" max="10" step="1" value="10" />
+            </label>
+
+            <div class="auth-actions">
+              <button type="button" id="saveCardBtn" class="btn">Save card</button>
+              <button type="button" id="newCardBtn" class="btn btn-ghost">New card</button>
+            </div>
+
+            <div id="cardsEmpty" class="cards-empty">No synced cards yet.</div>
+            <div id="cardsList" class="cards-list"></div>
+          </div>
+        </section>
+
         <footer class="panel-footer">
           <p>
             Data aggregated from public Clover online-ordering listings.
@@ -66,6 +106,85 @@
       </aside>
 
       <main id="map" role="application" aria-label="Merchant map"></main>
+    </div>
+
+    <div id="orderModal" class="order-modal" hidden aria-hidden="true">
+      <div
+        class="order-modal-card"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Order tracking"
+      >
+        <button
+          id="orderModalClose"
+          type="button"
+          class="order-modal-close"
+          aria-label="Close"
+        >
+          X
+        </button>
+
+        <header class="order-modal-header">
+          <h2 id="orderModalTitle">Track your Clover order</h2>
+          <p id="orderModalSubtitle" class="order-modal-subtitle">
+            Quick confirmation helps others know if Clover is working.
+          </p>
+        </header>
+
+        <section id="orderStep1" class="order-step">
+          <p class="order-question">
+            Did you successfully place your Clover order (so the Paze/checkout worked)?
+          </p>
+          <div class="order-actions">
+            <button id="orderYesBtn" type="button" class="btn">
+              Yes, it went through
+            </button>
+            <button id="orderNoBtn" type="button" class="btn btn-ghost">
+              No, it did not
+            </button>
+          </div>
+        </section>
+
+        <section id="orderStep2" class="order-step" hidden>
+          <p class="order-question">
+            Choose the card you used for the Paze promo (10 plays per card).
+          </p>
+
+          <div
+            class="order-bank-grid"
+            id="orderBankGrid"
+            aria-label="Card institution selector"
+          ></div>
+
+          <div class="order-card-picker">
+            <label class="field">
+              <span>Card label (e.g. "Chase debit")</span>
+              <input
+                id="orderCardLabel"
+                type="text"
+                placeholder="Enter a label for this card"
+                autocomplete="off"
+              />
+            </label>
+            <div class="order-remaining" id="orderRemaining">Remaining: -</div>
+          </div>
+
+          <div class="order-actions">
+            <button id="orderSubmitBtn" type="button" class="btn">
+              Submit success + update remaining
+            </button>
+          </div>
+        </section>
+
+        <section id="orderStep3" class="order-step" hidden>
+          <p class="order-question" id="orderThankYou">
+            Thanks - your report was submitted.
+          </p>
+          <div class="order-actions">
+            <button id="orderDoneBtn" type="button" class="btn">Done</button>
+          </div>
+        </section>
+      </div>
     </div>
 
     <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
