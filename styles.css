@@ -135,6 +135,7 @@ body {
 }
 
 .community-stat {
+  position: relative;
   padding: 0.85rem 0.9rem;
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -143,6 +144,14 @@ body {
     rgba(15, 107, 92, 0.1),
     rgba(255, 255, 255, 0.72)
   );
+  perspective: 900px;
+}
+
+.community-stat-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
 }
 
 .community-stat-label {
@@ -151,6 +160,55 @@ body {
   font-weight: 700;
   letter-spacing: 0.03em;
   text-transform: uppercase;
+}
+
+.community-stat-flip {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.85);
+  color: var(--ink);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.community-stat-flip:hover {
+  filter: brightness(1.03);
+}
+
+.community-stat-flip-icon {
+  width: 14px;
+  height: 14px;
+  display: block;
+}
+
+.community-stat-flipper {
+  position: relative;
+  margin-top: 0.35rem;
+  transition: transform 0.45s ease;
+  transform-style: preserve-3d;
+}
+
+.community-stat.is-flipped .community-stat-flipper {
+  transform: rotateY(180deg);
+}
+
+.community-stat-face {
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+.community-stat-face--back {
+  position: absolute;
+  inset: 0;
+  transform: rotateY(180deg);
+  display: flex;
+  align-items: center;
 }
 
 .community-stat-value {
@@ -169,7 +227,23 @@ body {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
-  margin-top: 0.55rem;
+  margin-top: 0.2rem;
+  width: 100%;
+}
+
+.community-stat-grid[hidden] {
+  display: none !important;
+}
+
+.community-stat-signin {
+  margin: 0.35rem 0 0;
+  color: var(--muted);
+  font-size: 0.86rem;
+  line-height: 1.35;
+}
+
+.community-stat-signin[hidden] {
+  display: none !important;
 }
 
 .community-mini {

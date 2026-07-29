@@ -37,28 +37,80 @@
         <div class="stat" id="stat">Loading...</div>
 
         <div class="community-stat" id="communityStat" aria-live="polite">
-          <div class="community-stat-label">Community promo credits</div>
+          <div class="community-stat-top">
+            <div class="community-stat-label" id="communityStatLabel">Community promo credits</div>
+            <button
+              type="button"
+              id="communityStatFlip"
+              class="community-stat-flip"
+              aria-label="Show your promo stats"
+              title="Flip to your stats"
+            >
+              <svg class="community-stat-flip-icon" viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+                <path
+                  d="M4 6.5h9.2M11.4 3.8 14.8 6.5 11.4 9.2M16 13.5H6.8M8.6 10.8 5.2 13.5 8.6 16.2"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+            </button>
+          </div>
 
-          <div class="community-stat-grid" role="group" aria-label="Community credit totals">
-            <div class="community-mini">
-              <div class="community-mini-label">Pending Credit</div>
-              <div class="community-mini-value">
-                <strong id="communityPendingCredits">-$</strong>
+          <div class="community-stat-flipper" id="communityStatFlipper">
+            <div class="community-stat-face community-stat-face--front">
+              <div class="community-stat-grid" role="group" aria-label="Community credit totals">
+                <div class="community-mini">
+                  <div class="community-mini-label">Pending Credit</div>
+                  <div class="community-mini-value">
+                    <strong id="communityPendingCredits">-$</strong>
+                  </div>
+                </div>
+
+                <div class="community-mini">
+                  <div class="community-mini-label">Confirmed returned</div>
+                  <div class="community-mini-value">
+                    <strong id="communityConfirmedCredits">-$</strong>
+                  </div>
+                </div>
+
+                <div class="community-mini">
+                  <div class="community-mini-label">Promos reported</div>
+                  <div class="community-mini-value">
+                    <strong id="communityPromosReportedN">-</strong>
+                  </div>
+                </div>
               </div>
             </div>
 
-            <div class="community-mini">
-              <div class="community-mini-label">Confirmed returned</div>
-              <div class="community-mini-value">
-                <strong id="communityConfirmedCredits">-$</strong>
-              </div>
-            </div>
+            <div class="community-stat-face community-stat-face--back" aria-hidden="true">
+              <div id="personalStatsSignedIn" class="community-stat-grid" role="group" aria-label="Your credit totals" hidden>
+                <div class="community-mini">
+                  <div class="community-mini-label">Pending Credit</div>
+                  <div class="community-mini-value">
+                    <strong id="personalPendingCredits">-$</strong>
+                  </div>
+                </div>
 
-            <div class="community-mini">
-              <div class="community-mini-label">Promos reported</div>
-              <div class="community-mini-value">
-                <strong id="communityPromosReportedN">-</strong>
+                <div class="community-mini">
+                  <div class="community-mini-label">Confirmed returned</div>
+                  <div class="community-mini-value">
+                    <strong id="personalConfirmedCredits">-$</strong>
+                  </div>
+                </div>
+
+                <div class="community-mini">
+                  <div class="community-mini-label">Promos reported</div>
+                  <div class="community-mini-value">
+                    <strong id="personalPromosReportedN">-</strong>
+                  </div>
+                </div>
               </div>
+              <p id="personalStatsSignedOut" class="community-stat-signin">
+                Sign in to see your promo stats.
+              </p>
             </div>
           </div>
         </div>

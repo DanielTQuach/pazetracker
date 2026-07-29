@@ -29,6 +29,14 @@ const statEl = document.getElementById("stat");
 const communityPendingCreditsEl = document.getElementById("communityPendingCredits");
 const communityConfirmedCreditsEl = document.getElementById("communityConfirmedCredits");
 const communityPromosReportedNEl = document.getElementById("communityPromosReportedN");
+const communityStatEl = document.getElementById("communityStat");
+const communityStatLabelEl = document.getElementById("communityStatLabel");
+const communityStatFlipEl = document.getElementById("communityStatFlip");
+const personalPendingCreditsEl = document.getElementById("personalPendingCredits");
+const personalConfirmedCreditsEl = document.getElementById("personalConfirmedCredits");
+const personalPromosReportedNEl = document.getElementById("personalPromosReportedN");
+const personalStatsSignedInEl = document.getElementById("personalStatsSignedIn");
+const personalStatsSignedOutEl = document.getElementById("personalStatsSignedOut");
 const sidebarToggleEl = document.getElementById("sidebarToggle");
 const sidebarPanelEl = document.getElementById("sidebarPanel");
 const sidebarBackdropEl = document.getElementById("sidebarBackdrop");
@@ -61,6 +69,7 @@ let popup = new maplibregl.Popup({
 // Order tracking modal (crowdsource)
 // -----------------------------
 const ORDER_PLAY_LIMIT_PER_CARD = 10;
+const PZ_PROMO_VALUE_DOLLARS = 10;
 const PENDING_ORDER_STORAGE_KEY = "pazetracker_pending_order_v1";
 const USER_CARDS_STORAGE_KEY = "pazetracker_user_cards_v1";
 
@@ -230,11 +239,17 @@ function renderAuthUi() {
   userSummaryEl.hidden = !signedIn;
   cardManagerEl.hidden = !signedIn;
 
-  if (!authState.config?.clerk?.enabled) return;
+  if (!authState.config?.clerk?.enabled) {
+    renderPersonalStats();
+    return;
+  }
 
   if (!signedIn) {
     authStatusEl.textContent = "Sign in to sync your tracker cards across devices.";
     userSummaryTextEl.textContent = "";
+    syncedCards = [];
+    renderSyncedCards();
+    renderPersonalStats();
     return;
   }
 
@@ -245,6 +260,7 @@ function renderAuthUi() {
     authState.user.primaryEmailAddress?.emailAddress ||
     "Signed in";
   userSummaryTextEl.textContent = displayName;
+  renderPersonalStats();
 }
 
 async function loadSyncedCards() {
@@ -253,6 +269,7 @@ async function loadSyncedCards() {
   const data = await res.json();
   syncedCards = Array.isArray(data.cards) ? data.cards : [];
   renderSyncedCards();
+  renderPersonalStats();
 }
 
 async function saveSyncedCard() {
@@ -280,6 +297,7 @@ async function saveSyncedCard() {
   syncedCards = Array.isArray(data.cards) ? data.cards : [];
   selectedSyncedCardId = payload.id || data.savedCardId || null;
   renderSyncedCards();
+  renderPersonalStats();
 }
 
 function resetCardForm() {
@@ -329,6 +347,7 @@ async function logSyncedPromoUse({ bankId, label, cardId = null, placeId = null 
   syncedCards = Array.isArray(data.cards) ? data.cards : syncedCards;
   if (data.savedCardId) selectedSyncedCardId = data.savedCardId;
   renderSyncedCards();
+  renderPersonalStats();
   return data;
 }
 
@@ -350,6 +369,7 @@ async function markPromoUseReceived(cardId, useId, receivedAt) {
   syncedCards = Array.isArray(data.cards) ? data.cards : syncedCards;
   if (data.community) renderCommunityStats(data.community);
   renderSyncedCards();
+  renderPersonalStats();
   if (historyCardId === cardId) renderHistoryModal(cardId);
   return data;
 }
@@ -637,6 +657,75 @@ function renderCommunityStats(stats) {
     ? promosRedeemed.toLocaleString()
     : "-";
 }
+
+function computePersonalPromoStats() {
+  let pending = 0;
+  let confirmed = 0;
+  for (const card of syncedCards) {
+    for (const use of getCardUses(card)) {
+      if (use.receivedAt) confirmed += 1;
+      else pending += 1;
+    }
+  }
+  return {
+    pending,
+    confirmed,
+    total: pending + confirmed,
+    pendingCreditsDollars: pending * PZ_PROMO_VALUE_DOLLARS,
+    confirmedCreditsDollars: confirmed * PZ_PROMO_VALUE_DOLLARS,
+  };
+}
+
+function renderPersonalStats() {
+  const signedIn = !!authState.user;
+  if (personalStatsSignedInEl) personalStatsSignedInEl.hidden = !signedIn;
+  if (personalStatsSignedOutEl) personalStatsSignedOutEl.hidden = signedIn;
+
+  if (!signedIn) {
+    if (personalPendingCreditsEl) personalPendingCreditsEl.textContent = "-";
+    if (personalConfirmedCreditsEl) personalConfirmedCreditsEl.textContent = "-";
+    if (personalPromosReportedNEl) personalPromosReportedNEl.textContent = "-";
+    return;
+  }
+
+  const stats = computePersonalPromoStats();
+  if (personalPendingCreditsEl) {
+    personalPendingCreditsEl.textContent = `$${stats.pendingCreditsDollars.toLocaleString()}`;
+  }
+  if (personalConfirmedCreditsEl) {
+    personalConfirmedCreditsEl.textContent = `$${stats.confirmedCreditsDollars.toLocaleString()}`;
+  }
+  if (personalPromosReportedNEl) {
+    personalPromosReportedNEl.textContent = stats.total.toLocaleString();
+  }
+}
+
+function setCommunityStatFlipped(isFlipped) {
+  if (!communityStatEl || !communityStatFlipEl) return;
+  communityStatEl.classList.toggle("is-flipped", !!isFlipped);
+  const showingPersonal = !!isFlipped;
+  if (communityStatLabelEl) {
+    communityStatLabelEl.textContent = showingPersonal
+      ? "Your promo credits"
+      : "Community promo credits";
+  }
+  communityStatFlipEl.setAttribute(
+    "aria-label",
+    showingPersonal ? "Show community promo stats" : "Show your promo stats"
+  );
+  communityStatFlipEl.title = showingPersonal ? "Flip to community" : "Flip to your stats";
+
+  const backFace = communityStatEl.querySelector(".community-stat-face--back");
+  const frontFace = communityStatEl.querySelector(".community-stat-face--front");
+  if (backFace) backFace.setAttribute("aria-hidden", showingPersonal ? "false" : "true");
+  if (frontFace) frontFace.setAttribute("aria-hidden", showingPersonal ? "true" : "false");
+}
+
+communityStatFlipEl?.addEventListener("click", () => {
+  const next = !communityStatEl?.classList.contains("is-flipped");
+  setCommunityStatFlipped(next);
+  if (next) renderPersonalStats();
+});
 
 async function loadCommunityStats() {
   const res = await fetch("/api/community-stats");
