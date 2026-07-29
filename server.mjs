@@ -82,6 +82,57 @@ const photoBytesCache = new Map();
 const CACHE_TTL_MS = 10 * 60 * 1000;
 const PHOTO_BYTES_TTL_MS = 24 * 60 * 60 * 1000;
 
+const ORDER_REPORTS_PATH = path.join(ROOT, "data", "order-reports.ndjson");
+fs.mkdirSync(path.dirname(ORDER_REPORTS_PATH), { recursive: true });
+
+/** @type {Map<string, { yes: number, no: number, lastReportedAt: string | null }>} */
+const orderStatsByPlaceId = new Map();
+
+function loadOrderStatsFromDisk() {
+  if (!fs.existsSync(ORDER_REPORTS_PATH)) return;
+  const raw = fs.readFileSync(ORDER_REPORTS_PATH, "utf8");
+  const lines = raw.split(/\r?\n/).filter(Boolean);
+  for (const line of lines) {
+    try {
+      const r = JSON.parse(line);
+      if (!r?.placeId) continue;
+      const s = orderStatsByPlaceId.get(r.placeId) || {
+        yes: 0,
+        no: 0,
+        lastReportedAt: null,
+      };
+      if (r.success) s.yes += 1;
+      else s.no += 1;
+      s.lastReportedAt = r.createdAt || null;
+      orderStatsByPlaceId.set(r.placeId, s);
+    } catch {
+      // ignore corrupted lines
+    }
+  }
+}
+
+loadOrderStatsFromDisk();
+
+function readJsonBody(req) {
+  return new Promise((resolve, reject) => {
+    let body = "";
+    req.on("data", (chunk) => {
+      body += chunk;
+      if (body.length > 1_000_000) {
+        reject(new Error("Request body too large"));
+      }
+    });
+    req.on("end", () => {
+      if (!body) return resolve({});
+      try {
+        resolve(JSON.parse(body));
+      } catch (e) {
+        reject(new Error("Invalid JSON body"));
+      }
+    });
+  });
+}
+
 function placeCacheKey(params) {
   return [
     params.get("name"),
@@ -96,6 +147,71 @@ function placeCacheKey(params) {
 const server = http.createServer(async (req, res) => {
   try {
     const apiKey = getGoogleApiKey();
+
+    if (req.url?.startsWith("/api/order-report-stats")) {
+      const parsed = new URL(req.url, `http://localhost:${PORT}`);
+      const placeId = parsed.searchParams.get("placeId") || "";
+      if (!placeId) {
+        sendJson(res, 400, { error: "missing_placeId", yes: 0, no: 0, total: 0 });
+        return;
+      }
+      const s = orderStatsByPlaceId.get(placeId) || {
+        yes: 0,
+        no: 0,
+        lastReportedAt: null,
+      };
+      const total = s.yes + s.no;
+      sendJson(res, 200, {
+        placeId,
+        yes: s.yes,
+        no: s.no,
+        total,
+        successRate: total ? s.yes / total : null,
+        lastReportedAt: s.lastReportedAt,
+      });
+      return;
+    }
+
+    if (req.url?.startsWith("/api/order-report")) {
+      if (req.method !== "POST") {
+        sendJson(res, 405, { error: "method_not_allowed" });
+        return;
+      }
+
+      const body = await readJsonBody(req);
+      const placeId = body?.placeId;
+      const orderingUrl = body?.orderingUrl;
+      const success = !!body?.success;
+      const createdAt = body?.createdAt || new Date().toISOString();
+
+      if (!placeId) {
+        sendJson(res, 400, { error: "missing_placeId" });
+        return;
+      }
+
+      const s = orderStatsByPlaceId.get(placeId) || {
+        yes: 0,
+        no: 0,
+        lastReportedAt: null,
+      };
+      if (success) s.yes += 1;
+      else s.no += 1;
+      s.lastReportedAt = createdAt;
+      orderStatsByPlaceId.set(placeId, s);
+
+      const reportLine = JSON.stringify({
+        placeId,
+        orderingUrl: orderingUrl || "",
+        success,
+        cardInstitution: body?.cardInstitution ?? null,
+        cardLabel: body?.cardLabel ?? null,
+        createdAt,
+      });
+      fs.appendFileSync(ORDER_REPORTS_PATH, reportLine + "\n");
+
+      sendJson(res, 200, { ok: true, yes: s.yes, no: s.no, total: s.yes + s.no });
+      return;
+    }
 
     if (req.url?.startsWith("/api/place-photos")) {
       if (!apiKey) {
