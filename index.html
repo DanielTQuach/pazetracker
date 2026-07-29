@@ -23,6 +23,33 @@
 
         <div class="stat" id="stat">Loading...</div>
 
+        <div class="community-stat" id="communityStat" aria-live="polite">
+          <div class="community-stat-label">Community promo credits</div>
+
+          <div class="community-stat-grid" role="group" aria-label="Community credit totals">
+            <div class="community-mini">
+              <div class="community-mini-label">Pending</div>
+              <div class="community-mini-value">
+                <strong id="communityPendingCredits">-$</strong>
+              </div>
+            </div>
+
+            <div class="community-mini">
+              <div class="community-mini-label">Confirmed returned</div>
+              <div class="community-mini-value">
+                <strong id="communityConfirmedCredits">-$</strong>
+              </div>
+            </div>
+
+            <div class="community-mini">
+              <div class="community-mini-label">N promos reported</div>
+              <div class="community-mini-value">
+                <strong id="communityPromosReportedN">-</strong>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <label class="field">
           <span>Search</span>
           <input
@@ -97,6 +124,23 @@
 
             <div id="cardsEmpty" class="cards-empty">No synced cards yet.</div>
             <div id="cardsList" class="cards-list"></div>
+
+            <div class="refund-report" aria-label="Report returned credit">
+              <div class="refund-report-title">Report credit returned</div>
+
+              <label class="field">
+                <span>Received date</span>
+                <input id="refundReceivedDate" type="date" />
+              </label>
+
+              <button type="button" id="confirmRefundBtn" class="btn btn-ghost" disabled>
+                Confirm returned credit
+              </button>
+
+              <p class="refund-report-copy">
+                Helps the community track how long the $10 credit takes to arrive.
+              </p>
+            </div>
           </div>
         </section>
 

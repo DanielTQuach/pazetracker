@@ -6,3 +6,6 @@ node_modules/
 data/clover-merchants.geojson
 data/order-reports.ndjson
 data/user-cards.json
+data/community-stats.json
+data/promo-refund-reports.ndjson
+data/community-stats.json

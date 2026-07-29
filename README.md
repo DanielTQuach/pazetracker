@@ -26,9 +26,19 @@ Used for popup photos, search result thumbnails, and ratings.
 Used for **optional sign-in** and **synced card tracking across devices**.
 
 - `CLERK_PUBLISHABLE_KEY`
+- `CLERK_SECRET_KEY`
+- `APP_ORIGIN=http://localhost:5173`
+
+Optional overrides (normally derived / unused when secret key is set):
+
 - `CLERK_FRONTEND_API`
 - `CLERK_JWT_KEY`
-- `APP_ORIGIN=http://localhost:5173`
+
+Pull keys with the Clerk CLI after `clerk auth login` and `clerk link`:
+
+```bash
+clerk env pull --file .env
+```
 
 The card tracker is manual only:
 
@@ -48,6 +58,10 @@ When signed in, users can:
 
 If Clerk is not configured, the auth section stays disabled gracefully.
 
+## Community tracker
+
+Everyone can see a public **community promos redeemed** count. It increases when someone reports a successful Clover order after opening ordering from the map. This is crowdsourced and in good faith.
+
 ## Data
 
 Local snapshot lives in `data/clover-merchants.geojson` (~26.5k restaurants + ~1.5k other businesses). The file is generated locally and not committed.
@@ -64,3 +78,4 @@ npm run fetch-data
 - Points are clustered; click a pin for Google photo gallery, address, and Clover ordering link
 - Search results can show Google thumbnails + ratings
 - Crowd order reports are stored separately from synced user cards
+- A public community promos redeemed counter updates on successful order reports

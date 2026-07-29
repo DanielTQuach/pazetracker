@@ -26,6 +26,9 @@ const typeSelect = document.getElementById("businessType");
 const acceptingOnly = document.getElementById("acceptingOnly");
 const resultsEl = document.getElementById("results");
 const statEl = document.getElementById("stat");
+const communityPendingCreditsEl = document.getElementById("communityPendingCredits");
+const communityConfirmedCreditsEl = document.getElementById("communityConfirmedCredits");
+const communityPromosReportedNEl = document.getElementById("communityPromosReportedN");
 const authStatusEl = document.getElementById("authStatus");
 const authActionsEl = document.getElementById("authActions");
 const userSummaryEl = document.getElementById("userSummary");
@@ -36,6 +39,8 @@ const cardsEmptyEl = document.getElementById("cardsEmpty");
 const sidebarBankGridEl = document.getElementById("sidebarBankGrid");
 const sidebarCardLabelEl = document.getElementById("sidebarCardLabel");
 const sidebarCardRemainingEl = document.getElementById("sidebarCardRemaining");
+const refundReceivedDateEl = document.getElementById("refundReceivedDate");
+const confirmRefundBtnEl = document.getElementById("confirmRefundBtn");
 
 let allFeatures = [];
 let popup = new maplibregl.Popup({
@@ -53,16 +58,16 @@ const PENDING_ORDER_STORAGE_KEY = "pazetracker_pending_order_v1";
 const USER_CARDS_STORAGE_KEY = "pazetracker_user_cards_v1";
 
 const BANKS = [
-  { id: "boa", name: "Bank of America", short: "BofA" },
+  { id: "boa", name: "Bank of America", short: "BofA", fullRow: true },
   { id: "capital_one", name: "Capital One", short: "Cap1" },
   { id: "chase", name: "Chase", short: "Chase" },
   { id: "citi", name: "Citi", short: "Citi" },
   { id: "pnc", name: "PNC", short: "PNC" },
   { id: "truist", name: "Truist", short: "Truist" },
   { id: "us_bank", name: "U.S. Bank", short: "US Bank" },
-  { id: "wells_fargo", name: "Wells Fargo", short: "Wells" },
-  { id: "elan_financial", name: "Elan Financial Services", short: "Elan" },
-  { id: "star_one_credit_union", name: "Star One Credit Union", short: "Star One" },
+  { id: "wells_fargo", name: "Wells Fargo", short: "Wells", fullRow: true },
+  { id: "elan_financial", name: "Elan Financial Services", short: "Elan", fullRow: true },
+  { id: "star_one_credit_union", name: "Star One Credit Union", short: "Star One", fullRow: true },
 ];
 
 let orderModal = null;
@@ -275,9 +280,44 @@ function resetCardForm() {
   selectedSidebarBankId = BANKS[0]?.id || "";
   if (sidebarCardLabelEl) sidebarCardLabelEl.value = "";
   if (sidebarCardRemainingEl) sidebarCardRemainingEl.value = "10";
+  if (refundReceivedDateEl) refundReceivedDateEl.value = "";
   renderSidebarBankChoices();
   renderSyncedCards();
+  updateRefundReportUi();
 }
+
+function updateRefundReportUi() {
+  if (!confirmRefundBtnEl) return;
+  confirmRefundBtnEl.disabled = !selectedSyncedCardId;
+}
+
+confirmRefundBtnEl?.addEventListener("click", async () => {
+  if (!selectedSyncedCardId) {
+    alert("Select a card first.");
+    return;
+  }
+  const receivedAt = (refundReceivedDateEl?.value || "").trim();
+  if (!receivedAt) {
+    alert("Pick the received date first.");
+    return;
+  }
+
+  try {
+    const res = await authedFetch("/api/promo-refund-confirm", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cardId: selectedSyncedCardId, receivedAt, count: 1 }),
+    });
+    if (!res.ok) {
+      const txt = await res.text().catch(() => "");
+      throw new Error(`Confirm returned credit failed (${res.status}) ${txt}`);
+    }
+    if (refundReceivedDateEl) refundReceivedDateEl.value = "";
+    await loadCommunityStats();
+  } catch (err) {
+    alert(String(err?.message || err));
+  }
+});
 
 function findCard(cards, bankId, label) {
   const normalized = String(label || "").trim();
@@ -299,27 +339,41 @@ function setStep(stepNumber) {
   orderStep3El.hidden = stepNumber !== 3;
 }
 
+function bankShortHtml(short) {
+  return escapeHtml(short).replaceAll(" ", "<br />");
+}
+
+function createBankChoiceButton(bank, { selectedId, onSelect }) {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "order-bank-choice";
+  if (bank.fullRow) btn.classList.add("order-bank-choice--full");
+  btn.dataset.bankId = bank.id;
+  btn.setAttribute("aria-label", bank.name);
+  btn.innerHTML = `
+    <div class="order-bank-simulated-card">${bankShortHtml(bank.short)}</div>
+    <div class="order-bank-name">${escapeHtml(bank.name)}</div>
+  `;
+  if (bank.id === selectedId) btn.classList.add("is-selected");
+  btn.addEventListener("click", onSelect);
+  return btn;
+}
+
 function renderBankChoices() {
   if (!orderBankGridEl) return;
   orderBankGridEl.innerHTML = "";
 
   for (const bank of BANKS) {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "order-bank-choice";
-    btn.dataset.bankId = bank.id;
-    btn.setAttribute("aria-label", bank.name);
-    btn.innerHTML = `
-      <div class="order-bank-simulated-card">${escapeHtml(bank.short)}</div>
-      <div class="order-bank-name">${escapeHtml(bank.name)}</div>
-    `;
-    if (bank.id === selectedBankId) btn.classList.add("is-selected");
-    btn.addEventListener("click", () => {
-      selectedBankId = bank.id;
-      renderBankChoices();
-      updateRemaining();
-    });
-    orderBankGridEl.appendChild(btn);
+    orderBankGridEl.appendChild(
+      createBankChoiceButton(bank, {
+        selectedId: selectedBankId,
+        onSelect: () => {
+          selectedBankId = bank.id;
+          renderBankChoices();
+          updateRemaining();
+        },
+      })
+    );
   }
 }
 
@@ -328,21 +382,15 @@ function renderSidebarBankChoices() {
   sidebarBankGridEl.innerHTML = "";
 
   for (const bank of BANKS) {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "order-bank-choice";
-    btn.dataset.bankId = bank.id;
-    btn.setAttribute("aria-label", bank.name);
-    btn.innerHTML = `
-      <div class="order-bank-simulated-card">${escapeHtml(bank.short)}</div>
-      <div class="order-bank-name">${escapeHtml(bank.name)}</div>
-    `;
-    if (bank.id === selectedSidebarBankId) btn.classList.add("is-selected");
-    btn.addEventListener("click", () => {
-      selectedSidebarBankId = bank.id;
-      renderSidebarBankChoices();
-    });
-    sidebarBankGridEl.appendChild(btn);
+    sidebarBankGridEl.appendChild(
+      createBankChoiceButton(bank, {
+        selectedId: selectedSidebarBankId,
+        onSelect: () => {
+          selectedSidebarBankId = bank.id;
+          renderSidebarBankChoices();
+        },
+      })
+    );
   }
 }
 
@@ -373,7 +421,7 @@ function renderSyncedCards() {
     if (card.id === selectedSyncedCardId) btn.classList.add("is-selected");
     btn.innerHTML = `
       <div class="saved-card-top">
-        <div class="order-bank-simulated-card">${escapeHtml(bank.short)}</div>
+        <div class="order-bank-simulated-card">${bankShortHtml(bank.short)}</div>
         <div class="saved-card-copy">
           <span class="saved-card-label">${escapeHtml(card.label)}</span>
           <span class="saved-card-bank">${escapeHtml(bank.name)}</span>
@@ -386,15 +434,17 @@ function renderSyncedCards() {
       selectedSidebarBankId = card.bankId;
       if (sidebarCardLabelEl) sidebarCardLabelEl.value = card.label;
       if (sidebarCardRemainingEl) sidebarCardRemainingEl.value = String(clampRemaining(card.remainingCount));
+      if (refundReceivedDateEl) refundReceivedDateEl.value = "";
       renderSidebarBankChoices();
       renderSyncedCards();
+      updateRefundReportUi();
     });
     cardsListEl.appendChild(btn);
   }
 }
 
 async function submitOrderReport({ placeId, orderingUrl, success, bankId, cardLabel }) {
-  if (!placeId) return;
+  if (!placeId) return null;
   const payload = {
     placeId,
     orderingUrl: orderingUrl || "",
@@ -414,6 +464,48 @@ async function submitOrderReport({ placeId, orderingUrl, success, bankId, cardLa
     const txt = await res.text().catch(() => "");
     throw new Error(`Order report failed (${res.status}) ${txt}`);
   }
+
+  const data = await res.json().catch(() => null);
+  if (data?.community) renderCommunityStats(data.community);
+  return data;
+}
+
+async function redeemCommunityPromo(count = 1) {
+  const res = await fetch("/api/promo-redeem", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ count }),
+  });
+  if (!res.ok) return null;
+  const data = await res.json().catch(() => null);
+  if (data) renderCommunityStats(data);
+  return data;
+}
+
+function renderCommunityStats(stats) {
+  if (!communityPendingCreditsEl || !communityConfirmedCreditsEl || !communityPromosReportedNEl)
+    return;
+
+  const pendingDollars = Number(stats?.pendingCreditsDollars);
+  const confirmedDollars = Number(stats?.confirmedCreditsDollars);
+  const promosRedeemed = Number(stats?.promosRedeemed);
+
+  communityPendingCreditsEl.textContent = Number.isFinite(pendingDollars)
+    ? `$${pendingDollars.toLocaleString()}`
+    : "-";
+  communityConfirmedCreditsEl.textContent = Number.isFinite(confirmedDollars)
+    ? `$${confirmedDollars.toLocaleString()}`
+    : "-";
+  communityPromosReportedNEl.textContent = Number.isFinite(promosRedeemed)
+    ? promosRedeemed.toLocaleString()
+    : "-";
+}
+
+async function loadCommunityStats() {
+  const res = await fetch("/api/community-stats");
+  if (!res.ok) return;
+  const data = await res.json();
+  renderCommunityStats(data);
 }
 
 async function openOrderModalFromPending() {
@@ -514,6 +606,9 @@ function wireOrderModalUi() {
           cardLabel: label,
         });
         markOrderReportSubmittedToday(p.placeId);
+      } else {
+        // Place report already counted today; still record the promo use globally.
+        await redeemCommunityPromo(1);
       }
     } catch (e) {
       alert(String(e?.message || e));
@@ -1096,6 +1191,7 @@ document.getElementById("newCardBtn")?.addEventListener("click", () => {
 
 map.on("load", async () => {
   addMerchantLayers();
+  loadCommunityStats().catch(console.error);
   try {
     await loadData();
   } catch (err) {

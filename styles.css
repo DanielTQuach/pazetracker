@@ -88,6 +88,86 @@ body {
   font-size: 1.25rem;
 }
 
+.community-stat {
+  padding: 0.85rem 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: linear-gradient(
+    180deg,
+    rgba(15, 107, 92, 0.1),
+    rgba(255, 255, 255, 0.72)
+  );
+}
+
+.community-stat-label {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.community-stat-value {
+  margin-top: 0.2rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.community-stat-value strong {
+  color: var(--accent);
+  font-family: var(--font-display);
+  font-size: 1.45rem;
+}
+
+.community-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 0.55rem;
+}
+
+.community-mini {
+  padding: 0.35rem 0.2rem;
+}
+
+.community-mini-label {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.community-mini-value {
+  margin-top: 0.2rem;
+  font-weight: 800;
+}
+
+.community-mini-value strong {
+  color: var(--accent);
+  font-family: var(--font-display);
+  font-size: 1.25rem;
+}
+
+.refund-report {
+  margin-top: 0.9rem;
+  padding-top: 0.75rem;
+  border-top: 1px dashed var(--line);
+}
+
+.refund-report-title {
+  margin: 0 0 0.55rem;
+  font-weight: 900;
+  color: var(--ink);
+}
+
+.refund-report-copy {
+  margin: 0.4rem 0 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
 .field {
   display: grid;
   gap: 0.35rem;
@@ -185,6 +265,12 @@ body {
   display: flex;
   gap: 0.55rem;
   margin-top: 0.8rem;
+}
+
+.auth-actions[hidden],
+.user-summary[hidden],
+.card-manager[hidden] {
+  display: none !important;
 }
 
 .user-summary {
@@ -596,15 +682,18 @@ body {
 
 .order-bank-choice {
   display: grid;
-  grid-template-columns: 48px 1fr;
+  grid-template-columns: 56px minmax(0, 1fr);
   gap: 10px;
   align-items: center;
-  padding: 10px 10px;
+  min-width: 0;
+  min-height: 52px;
+  padding: 8px 10px;
   border-radius: 12px;
   border: 1px solid var(--line);
   background: #ffffff;
   cursor: pointer;
   user-select: none;
+  overflow: hidden;
 }
 
 .order-bank-choice.is-selected {
@@ -612,24 +701,40 @@ body {
   box-shadow: 0 0 0 3px rgba(15, 107, 92, 0.18);
 }
 
+.order-bank-choice--full {
+  grid-column: 1 / -1;
+}
+
 .order-bank-simulated-card {
-  width: 48px;
-  height: 32px;
+  width: 56px;
+  min-height: 40px;
+  height: 100%;
+  max-height: 44px;
   border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: 4px 5px;
+  box-sizing: border-box;
   font-weight: 900;
   color: #ffffff;
   letter-spacing: -0.02em;
-  font-size: 14px;
+  font-size: 11px;
+  line-height: 1.15;
+  text-align: center;
+  text-wrap: balance;
   background: linear-gradient(135deg, var(--accent), #1d3a35);
 }
 
 .order-bank-name {
+  min-width: 0;
   font-weight: 800;
   color: var(--ink);
-  line-height: 1.2;
+  line-height: 1.25;
+  font-size: 0.82rem;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  hyphens: auto;
 }
 
 .order-remaining {
