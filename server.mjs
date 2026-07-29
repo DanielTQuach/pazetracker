@@ -264,6 +264,58 @@ function persistUserCardsStore() {
   fs.writeFileSync(USER_CARDS_PATH, JSON.stringify(userCardsStore, null, 2));
 }
 
+function todayLocalDateKey(date = new Date()) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function normalizePromoUses(uses) {
+  if (!Array.isArray(uses)) return [];
+  return uses
+    .filter((u) => u && typeof u === "object")
+    .map((u) => ({
+      id: String(u.id || randomUUID()),
+      promoNumber: Math.max(1, Math.min(10, Number(u.promoNumber) || 1)),
+      usedAt: String(u.usedAt || todayLocalDateKey()),
+      receivedAt: u.receivedAt ? String(u.receivedAt) : null,
+      placeId: u.placeId ? String(u.placeId) : null,
+      createdAt: String(u.createdAt || new Date().toISOString()),
+    }))
+    .sort((a, b) => b.promoNumber - a.promoNumber || String(a.usedAt).localeCompare(String(b.usedAt)));
+}
+
+function normalizeCard(card) {
+  const remainingCount = Math.max(0, Math.min(10, Number(card?.remainingCount ?? 10)));
+  return {
+    ...card,
+    remainingCount,
+    uses: normalizePromoUses(card?.uses),
+  };
+}
+
+function getUserCardsList(userId) {
+  const cards = Array.isArray(userCardsStore[userId]) ? userCardsStore[userId] : [];
+  return cards.map(normalizeCard);
+}
+
+function setUserCardsList(userId, cards) {
+  userCardsStore[userId] = cards.map(normalizeCard);
+  persistUserCardsStore();
+  return userCardsStore[userId];
+}
+
+function bumpCommunityRefundConfirmed(count = 1) {
+  communityStats.promosRefundConfirmed += Math.max(1, count);
+  communityStats.promosRefundConfirmed = Math.min(
+    communityStats.promosRefundConfirmed,
+    communityStats.promosRedeemed
+  );
+  communityStats.updatedAt = new Date().toISOString();
+  persistCommunityStats();
+}
+
 function readJsonBody(req) {
   return new Promise((resolve, reject) => {
     let body = "";
@@ -341,12 +393,147 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (req.url?.startsWith("/api/user-cards/use/receive")) {
+      if (req.method !== "POST") {
+        sendJson(res, 405, { error: "method_not_allowed" });
+        return;
+      }
+
+      const { userId } = await requireClerkUser(req);
+      const body = await readJsonBody(req).catch(() => ({}));
+      const cardId = String(body?.cardId || "").trim();
+      const useId = String(body?.useId || "").trim();
+      const receivedAt = String(body?.receivedAt || todayLocalDateKey()).trim();
+
+      if (!cardId || !useId) {
+        sendJson(res, 400, { error: "missing_fields" });
+        return;
+      }
+
+      const cards = getUserCardsList(userId);
+      const card = cards.find((c) => c.id === cardId);
+      if (!card) {
+        sendJson(res, 404, { error: "card_not_found" });
+        return;
+      }
+
+      const use = (card.uses || []).find((u) => u.id === useId);
+      if (!use) {
+        sendJson(res, 404, { error: "use_not_found" });
+        return;
+      }
+
+      if (!use.receivedAt) {
+        use.receivedAt = receivedAt;
+        setUserCardsList(userId, cards);
+        bumpCommunityRefundConfirmed(1);
+
+        fs.appendFileSync(
+          PROMO_REFUND_REPORTS_PATH,
+          JSON.stringify({
+            userId,
+            cardId,
+            useId,
+            receivedAt,
+            usedAt: use.usedAt,
+            promoNumber: use.promoNumber,
+            createdAt: new Date().toISOString(),
+          }) + "\n"
+        );
+      }
+
+      sendJson(
+        res,
+        200,
+        {
+          ok: true,
+          cards: getUserCardsList(userId),
+          community: computeCommunityTracker(),
+        },
+        0
+      );
+      return;
+    }
+
+    if (req.url?.startsWith("/api/user-cards/use")) {
+      if (req.method !== "POST") {
+        sendJson(res, 405, { error: "method_not_allowed" });
+        return;
+      }
+
+      const { userId } = await requireClerkUser(req);
+      const body = await readJsonBody(req).catch(() => ({}));
+      const bankId = String(body?.bankId || "").trim();
+      const label = String(body?.label || "").trim();
+      const cardId = body?.cardId ? String(body.cardId).trim() : "";
+      const placeId = body?.placeId ? String(body.placeId) : null;
+      const usedAt = String(body?.usedAt || todayLocalDateKey()).trim();
+
+      if (!cardId && (!bankId || !label)) {
+        sendJson(res, 400, { error: "missing_card_fields" });
+        return;
+      }
+
+      const cards = getUserCardsList(userId);
+      let card = cardId
+        ? cards.find((c) => c.id === cardId)
+        : cards.find((c) => c.bankId === bankId && c.label === label);
+
+      if (!card) {
+        if (!bankId || !label) {
+          sendJson(res, 404, { error: "card_not_found" });
+          return;
+        }
+        card = {
+          id: randomUUID(),
+          bankId,
+          label,
+          remainingCount: 10,
+          uses: [],
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+        cards.unshift(card);
+      }
+
+      if (card.remainingCount <= 0) {
+        sendJson(res, 400, { error: "no_promos_left", cards });
+        return;
+      }
+
+      const promoNumber = card.remainingCount;
+      const use = {
+        id: randomUUID(),
+        promoNumber,
+        usedAt,
+        receivedAt: null,
+        placeId,
+        createdAt: new Date().toISOString(),
+      };
+      card.uses = normalizePromoUses([...(card.uses || []), use]);
+      card.remainingCount = Math.max(0, card.remainingCount - 1);
+      card.updatedAt = new Date().toISOString();
+      setUserCardsList(userId, cards);
+
+      sendJson(
+        res,
+        200,
+        {
+          ok: true,
+          cards: getUserCardsList(userId),
+          savedCardId: card.id,
+          use,
+        },
+        0
+      );
+      return;
+    }
+
     if (req.url?.startsWith("/api/user-cards")) {
       const { userId } = await requireClerkUser(req);
 
       if (req.method === "GET") {
-        const cards = Array.isArray(userCardsStore[userId]) ? userCardsStore[userId] : [];
-        sendJson(res, 200, { cards });
+        sendJson(res, 200, { cards: getUserCardsList(userId) });
         return;
       }
 
@@ -362,21 +549,22 @@ const server = http.createServer(async (req, res) => {
           return;
         }
 
-        const cards = Array.isArray(userCardsStore[userId]) ? userCardsStore[userId] : [];
+        const cards = getUserCardsList(userId);
         const index = cards.findIndex((c) => c.id === id);
+        const existing = index >= 0 ? cards[index] : null;
         const next = {
           id,
           bankId,
           label,
           remainingCount,
+          uses: normalizePromoUses(body?.uses ?? existing?.uses ?? []),
           updatedAt: new Date().toISOString(),
-          createdAt: index >= 0 ? cards[index].createdAt : new Date().toISOString(),
+          createdAt: existing?.createdAt || new Date().toISOString(),
         };
         if (index >= 0) cards[index] = next;
         else cards.unshift(next);
-        userCardsStore[userId] = cards;
-        persistUserCardsStore();
-        sendJson(res, 200, { cards, savedCardId: id });
+        setUserCardsList(userId, cards);
+        sendJson(res, 200, { cards: getUserCardsList(userId), savedCardId: id });
         return;
       }
 
