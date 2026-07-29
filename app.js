@@ -29,6 +29,9 @@ const statEl = document.getElementById("stat");
 const communityPendingCreditsEl = document.getElementById("communityPendingCredits");
 const communityConfirmedCreditsEl = document.getElementById("communityConfirmedCredits");
 const communityPromosReportedNEl = document.getElementById("communityPromosReportedN");
+const sidebarToggleEl = document.getElementById("sidebarToggle");
+const sidebarPanelEl = document.getElementById("sidebarPanel");
+const sidebarBackdropEl = document.getElementById("sidebarBackdrop");
 const authStatusEl = document.getElementById("authStatus");
 const authActionsEl = document.getElementById("authActions");
 const userSummaryEl = document.getElementById("userSummary");
@@ -1241,6 +1244,48 @@ window.addEventListener("focus", () => {
   hasLostFocusSinceLoad = false;
   checkPendingOrder();
 });
+
+function setSidebarOpen(isOpen) {
+  if (!sidebarPanelEl || !sidebarToggleEl || !sidebarBackdropEl) return;
+  sidebarPanelEl.classList.toggle("is-open", !!isOpen);
+  sidebarBackdropEl.hidden = !isOpen;
+  sidebarToggleEl.setAttribute("aria-expanded", String(!!isOpen));
+}
+
+function isMobileSidebar() {
+  return window.matchMedia("(max-width: 860px)").matches;
+}
+
+function initMobileSidebar() {
+  if (!sidebarToggleEl || !sidebarPanelEl || !sidebarBackdropEl) return;
+
+  const applyByWidth = () => {
+    if (!isMobileSidebar()) {
+      sidebarPanelEl.classList.remove("is-open");
+      sidebarBackdropEl.hidden = true;
+      sidebarToggleEl.setAttribute("aria-expanded", "false");
+      return;
+    }
+    setSidebarOpen(false);
+  };
+
+  applyByWidth();
+  window.addEventListener("resize", applyByWidth);
+
+  sidebarToggleEl.addEventListener("click", () => {
+    if (!isMobileSidebar()) return;
+    const next = !sidebarPanelEl.classList.contains("is-open");
+    setSidebarOpen(next);
+  });
+
+  sidebarBackdropEl.addEventListener("click", () => setSidebarOpen(false));
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") setSidebarOpen(false);
+  });
+}
+
+initMobileSidebar();
 
 renderSidebarBankChoices();
 resetCardForm();

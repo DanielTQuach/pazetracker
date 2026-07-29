@@ -12,7 +12,19 @@
   </head>
   <body>
     <div id="app">
-      <aside class="panel" aria-label="Filters">
+      <button
+        type="button"
+        id="sidebarToggle"
+        class="sidebar-toggle"
+        aria-expanded="false"
+        aria-controls="sidebarPanel"
+      >
+        Controls
+      </button>
+
+      <div id="sidebarBackdrop" class="sidebar-backdrop" hidden></div>
+
+      <aside id="sidebarPanel" class="panel" aria-label="Filters">
         <header class="panel-header">
           <p class="brand">PazeTracker</p>
           <h1>Clover merchants</h1>
