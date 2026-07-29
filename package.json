@@ -4,7 +4,7 @@
   "private": true,
   "description": "MapLibre map of US Clover merchants (Paze checkout)",
   "scripts": {
-    "start": "npx --yes serve -l 5173 .",
+    "start": "node server.mjs",
     "fetch-data": "node scripts/fetch-data.mjs"
   }
 }
