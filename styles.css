@@ -162,6 +162,17 @@ body {
   text-transform: uppercase;
 }
 
+.community-stat-note {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 0.86rem;
+  line-height: 1.35;
+}
+
+.community-stat.is-flipped .community-stat-note {
+  display: none;
+}
+
 .community-stat-flip {
   flex: 0 0 auto;
   width: 28px;
@@ -898,6 +909,183 @@ body {
 
 .order-actions .btn {
   flex: 1;
+}
+
+.order-actions--stack {
+  flex-direction: column;
+}
+
+.order-actions--stack .btn {
+  flex: none;
+  width: 100%;
+}
+
+.order-question--soft {
+  font-weight: 600;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.order-link-btn {
+  margin-top: 12px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 700;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.order-link-btn:hover {
+  filter: brightness(0.92);
+}
+
+.order-chip-group {
+  margin-bottom: 12px;
+}
+
+.order-chip-label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.order-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.order-chip {
+  padding: 7px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.88rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.order-chip.is-selected {
+  border-color: var(--accent);
+  background: #fff4e6;
+  color: var(--ink);
+}
+
+.popup-community-block {
+  margin: 10px 0 4px;
+}
+
+.popup-community-summary {
+  margin: 0;
+  font-size: 0.88rem;
+  color: var(--muted);
+}
+
+.popup-reports-toggle {
+  margin-top: 8px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: 0.86rem;
+  font-weight: 700;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.popup-reports-list {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.popup-report {
+  font-size: 0.84rem;
+  line-height: 1.35;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: #f4f4f4;
+  color: var(--ink);
+}
+
+.popup-report--positive {
+  background: #e8f5e9;
+  color: #1b5e20;
+}
+
+.popup-report--negative {
+  background: #fdecea;
+  color: #b42318;
+}
+
+.order-saved-cards-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.order-saved-cards-empty {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.order-pick-card {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+  cursor: pointer;
+  text-align: left;
+}
+
+.order-pick-card.is-selected {
+  border-color: var(--accent);
+  background: #fff4e6;
+}
+
+.order-pick-card-label {
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.order-pick-card-meta {
+  font-size: 0.84rem;
+  color: var(--muted);
+}
+
+.order-new-card-form {
+  margin-top: 10px;
+  margin-bottom: 4px;
+}
+
+.order-new-card-note {
+  margin: 0 0 8px;
+  font-size: 0.86rem;
+  color: var(--muted);
+  line-height: 1.35;
 }
 
 .order-bank-grid {

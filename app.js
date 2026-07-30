@@ -71,6 +71,27 @@ let popup = new maplibregl.Popup({
 const ORDER_PLAY_LIMIT_PER_CARD = 10;
 const PZ_PROMO_VALUE_DOLLARS = 10;
 const PENDING_ORDER_STORAGE_KEY = "pazetracker_pending_order_v1";
+
+const REPORT_DEVICE_OPTIONS = [
+  { id: "mobile", label: "Mobile" },
+  { id: "desktop", label: "Desktop" },
+];
+
+const REPORT_BROWSER_OPTIONS = [
+  { id: "chrome", label: "Chrome" },
+  { id: "firefox", label: "Firefox" },
+  { id: "safari", label: "Safari" },
+  { id: "edge", label: "Edge" },
+];
+
+const ORDER_STEP_IDS = [
+  "orderStep1",
+  "orderStepYesQuick",
+  "orderStep2",
+  "orderStepIssue",
+  "orderStepIssuePaze",
+  "orderStep3",
+];
 const USER_CARDS_STORAGE_KEY = "pazetracker_user_cards_v1";
 
 const BANKS = [
@@ -88,14 +109,20 @@ const BANKS = [
 
 let orderModal = null;
 let orderStep1El = null;
+let orderStepYesQuickEl = null;
 let orderStep2El = null;
+let orderStepIssueEl = null;
+let orderStepIssuePazeEl = null;
 let orderStep3El = null;
 let orderBankGridEl = null;
 let orderCardLabelEl = null;
-let orderRemainingEl = null;
 let currentPendingOrder = null;
 let orderModalOpen = false;
 let selectedBankId = "";
+let orderReportDevice = null;
+let orderReportBrowser = null;
+let orderPickerSelectedCardId = null;
+let orderNewCardMode = false;
 let selectedSidebarBankId = BANKS[0]?.id || "";
 let selectedSyncedCardId = null;
 let syncedCards = [];
@@ -127,8 +154,10 @@ function clampRemaining(value) {
   return Math.max(0, Math.min(10, Math.round(num)));
 }
 
-// Prevent crowd-report spam: only allow 1 community update per place per day (per browser).
+// Prevent crowd-report spam: cap community reports per place per day (per browser).
 const USER_ORDER_REPORTS_STORAGE_KEY = "pazetracker_user_order_reports_v1";
+const ORDER_REPORT_DAILY_LIMIT_PER_PLACE = 3;
+const ORDER_MODAL_DISMISS_STORAGE_KEY = "pazetracker_order_modal_dismiss_v1";
 
 function todayLocalKey() {
   const d = new Date();
@@ -149,17 +178,70 @@ function getOrderReportsMap() {
   }
 }
 
+function getOrderReportCountToday(placeId) {
+  if (!placeId) return 0;
+  const map = getOrderReportsMap();
+  const raw = map[String(placeId)];
+  const today = todayLocalKey();
+  if (!raw) return 0;
+  // Legacy: value was a date string when only one report per day was allowed.
+  if (typeof raw === "string") return raw === today ? 1 : 0;
+  if (raw.date !== today) return 0;
+  return Math.max(0, Number(raw.count) || 0);
+}
+
+function canSubmitOrderReportToday(placeId) {
+  return getOrderReportCountToday(placeId) < ORDER_REPORT_DAILY_LIMIT_PER_PLACE;
+}
+
 function markOrderReportSubmittedToday(placeId) {
   if (!placeId) return;
   const map = getOrderReportsMap();
-  map[String(placeId)] = todayLocalKey();
+  const key = String(placeId);
+  const today = todayLocalKey();
+  const raw = map[key];
+  let count = 0;
+  if (typeof raw === "string" && raw === today) count = 1;
+  else if (raw && raw.date === today) count = Number(raw.count) || 0;
+  map[key] = { date: today, count: count + 1 };
   localStorage.setItem(USER_ORDER_REPORTS_STORAGE_KEY, JSON.stringify(map));
 }
 
 function hasSubmittedOrderReportToday(placeId) {
-  if (!placeId) return false;
-  const map = getOrderReportsMap();
-  return map[String(placeId)] === todayLocalKey();
+  return !canSubmitOrderReportToday(placeId);
+}
+
+function getOrderModalDismissMap() {
+  try {
+    const raw = sessionStorage.getItem(ORDER_MODAL_DISMISS_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function getOrderModalDismissCount(placeId) {
+  if (!placeId) return 0;
+  const map = getOrderModalDismissMap();
+  return Math.max(0, Number(map[String(placeId)]) || 0);
+}
+
+function markOrderModalDismissed(placeId) {
+  if (!placeId) return;
+  const map = getOrderModalDismissMap();
+  map[String(placeId)] = getOrderModalDismissCount(placeId) + 1;
+  sessionStorage.setItem(ORDER_MODAL_DISMISS_STORAGE_KEY, JSON.stringify(map));
+}
+
+function updateOrderNoButtonLabel(placeId) {
+  const btn = document.getElementById("orderNoBtn");
+  if (!btn) return;
+  btn.textContent =
+    getOrderModalDismissCount(placeId) > 0
+      ? "No, still looking?"
+      : "No, still browsing";
 }
 
 async function fetchAppConfig() {
@@ -477,10 +559,135 @@ function getRemainingPlays(bankId, label) {
 }
 
 function setStep(stepNumber) {
-  if (!orderStep1El || !orderStep2El || !orderStep3El) return;
-  orderStep1El.hidden = stepNumber !== 1;
-  orderStep2El.hidden = stepNumber !== 2;
-  orderStep3El.hidden = stepNumber !== 3;
+  const map = {
+    1: "orderStep1",
+    2: "orderStep2",
+    3: "orderStep3",
+  };
+  showOrderStep(map[stepNumber] || "orderStep1");
+}
+
+function showOrderStep(activeId) {
+  for (const id of ORDER_STEP_IDS) {
+    const el = document.getElementById(id);
+    if (el) el.hidden = id !== activeId;
+  }
+}
+
+function detectReportDevice() {
+  return window.matchMedia("(max-width: 860px)").matches ? "mobile" : "desktop";
+}
+
+function detectReportBrowser() {
+  const ua = navigator.userAgent;
+  if (/Edg\//i.test(ua)) return "edge";
+  if (/Firefox/i.test(ua)) return "firefox";
+  if (/Chrome/i.test(ua)) return "chrome";
+  if (/Safari/i.test(ua)) return "safari";
+  return null;
+}
+
+function resetOrderReportMeta() {
+  orderReportDevice = detectReportDevice();
+  orderReportBrowser = detectReportBrowser();
+  renderOrderChipRows();
+}
+
+function renderChipRow(container, options, selectedId, onSelect) {
+  if (!container) return;
+  container.innerHTML = "";
+  for (const opt of options) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "order-chip";
+    if (opt.id === selectedId) btn.classList.add("is-selected");
+    btn.textContent = opt.label;
+    btn.addEventListener("click", () => onSelect(opt.id));
+    container.appendChild(btn);
+  }
+}
+
+function renderOrderChipRows() {
+  renderChipRow(
+    document.getElementById("orderDeviceChips"),
+    REPORT_DEVICE_OPTIONS,
+    orderReportDevice,
+    (id) => {
+      orderReportDevice = id;
+      renderOrderChipRows();
+    }
+  );
+  renderChipRow(
+    document.getElementById("orderBrowserChips"),
+    REPORT_BROWSER_OPTIONS,
+    orderReportBrowser,
+    (id) => {
+      orderReportBrowser = id;
+      renderOrderChipRows();
+    }
+  );
+  renderChipRow(
+    document.getElementById("orderIssueDeviceChips"),
+    REPORT_DEVICE_OPTIONS,
+    orderReportDevice,
+    (id) => {
+      orderReportDevice = id;
+      renderOrderChipRows();
+    }
+  );
+  renderChipRow(
+    document.getElementById("orderIssueBrowserChips"),
+    REPORT_BROWSER_OPTIONS,
+    orderReportBrowser,
+    (id) => {
+      orderReportBrowser = id;
+      renderOrderChipRows();
+    }
+  );
+}
+
+function formatRelativeTime(iso) {
+  if (!iso) return "";
+  const diff = Date.now() - new Date(iso).getTime();
+  if (!Number.isFinite(diff)) return "";
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  return `${days}d ago`;
+}
+
+function capitalizeWord(value) {
+  const s = String(value || "").trim();
+  if (!s) return "";
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+function formatReportText(report) {
+  const time = formatRelativeTime(report?.createdAt);
+  const timeSuffix = time ? ` · ${time}` : "";
+
+  if (report?.success) {
+    const parts = ["Successfully ordered using Paze"];
+    if (report.browser) parts.push(`on ${capitalizeWord(report.browser)}`);
+    if (report.device) parts.push(capitalizeWord(report.device));
+    return `${parts.join(" ")}${timeSuffix}`;
+  }
+
+  if (report?.issueReason === "not_taking_orders") {
+    return `Not taking online orders${timeSuffix}`;
+  }
+
+  if (report?.issueReason === "paze_issues") {
+    let text = "Paze/checkout issues";
+    if (report.browser) text += ` on ${capitalizeWord(report.browser)}`;
+    if (report.device) text += ` ${capitalizeWord(report.device)}`;
+    return `${text}${timeSuffix}`;
+  }
+
+  return `Issue reported${timeSuffix}`;
 }
 
 function bankShortHtml(short) {
@@ -514,7 +721,6 @@ function renderBankChoices() {
         onSelect: () => {
           selectedBankId = bank.id;
           renderBankChoices();
-          updateRemaining();
         },
       })
     );
@@ -538,14 +744,107 @@ function renderSidebarBankChoices() {
   }
 }
 
-function updateRemaining() {
-  const label = (orderCardLabelEl?.value || "").trim();
-  if (!selectedBankId || !label) {
-    if (orderRemainingEl) orderRemainingEl.textContent = "Remaining: -";
+function getTrackableCards() {
+  if (authState.user) {
+    return syncedCards.map((card) => ({
+      id: card.id,
+      bankId: card.bankId,
+      label: card.label,
+      remainingCount: clampRemaining(card.remainingCount),
+    }));
+  }
+  return getUserCards().map((card) => ({
+    id: `${card.bankId}|${card.label}`,
+    bankId: card.bankId,
+    label: card.label,
+    remainingCount: Math.max(
+      0,
+      ORDER_PLAY_LIMIT_PER_CARD - (Number(card.usedCount) || 0)
+    ),
+  }));
+}
+
+function setOrderNewCardMode(enabled) {
+  orderNewCardMode = !!enabled;
+  const listEl = document.getElementById("orderSavedCardsList");
+  const emptyEl = document.getElementById("orderSavedCardsEmpty");
+  const formEl = document.getElementById("orderNewCardForm");
+  const toggleBtn = document.getElementById("orderAddNewCardBtn");
+  const cards = getTrackableCards();
+
+  if (listEl) listEl.hidden = orderNewCardMode || cards.length === 0;
+  if (emptyEl) emptyEl.hidden = orderNewCardMode || cards.length > 0;
+  if (formEl) formEl.hidden = !orderNewCardMode;
+  if (toggleBtn) {
+    toggleBtn.hidden = cards.length === 0;
+    toggleBtn.textContent = orderNewCardMode ? "Use a saved card" : "Add a new card";
+  }
+}
+
+function renderOrderCardPicker() {
+  const listEl = document.getElementById("orderSavedCardsList");
+  const emptyEl = document.getElementById("orderSavedCardsEmpty");
+  if (!listEl || !emptyEl) return;
+
+  const cards = getTrackableCards();
+  listEl.innerHTML = "";
+
+  if (!cards.length) {
+    emptyEl.hidden = false;
+    listEl.hidden = true;
+    orderPickerSelectedCardId = null;
+    setOrderNewCardMode(true);
     return;
   }
-  const remaining = getRemainingPlays(selectedBankId, label);
-  if (orderRemainingEl) orderRemainingEl.textContent = `Remaining: ${remaining}/${ORDER_PLAY_LIMIT_PER_CARD}`;
+
+  emptyEl.hidden = true;
+  listEl.hidden = orderNewCardMode;
+
+  for (const card of cards) {
+    const bank = getBankById(card.bankId);
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "order-pick-card";
+    if (card.id === orderPickerSelectedCardId) btn.classList.add("is-selected");
+    btn.innerHTML = `
+      <div class="order-bank-simulated-card">${bankShortHtml(bank.short)}</div>
+      <div>
+        <div class="order-pick-card-label">${escapeHtml(card.label)}</div>
+        <div class="order-pick-card-meta">${escapeHtml(bank.name)} · ${card.remainingCount}/10 left</div>
+      </div>
+    `;
+    btn.addEventListener("click", () => {
+      orderPickerSelectedCardId = card.id;
+      setOrderNewCardMode(false);
+      renderOrderCardPicker();
+    });
+    listEl.appendChild(btn);
+  }
+
+  if (!orderNewCardMode && !orderPickerSelectedCardId && cards.length) {
+    orderPickerSelectedCardId = cards[0].id;
+    renderOrderCardPicker();
+    return;
+  }
+
+  setOrderNewCardMode(orderNewCardMode);
+}
+
+async function showOrderCardStep() {
+  if (authState.user) {
+    try {
+      await loadSyncedCards();
+    } catch {
+      // use cached synced cards
+    }
+  }
+  orderPickerSelectedCardId = null;
+  orderNewCardMode = getTrackableCards().length === 0;
+  selectedBankId = BANKS[0]?.id || "";
+  if (orderCardLabelEl) orderCardLabelEl.value = "";
+  renderBankChoices();
+  renderOrderCardPicker();
+  setStep(2);
 }
 
 function getBankById(bankId) {
@@ -600,7 +899,16 @@ function renderSyncedCards() {
   }
 }
 
-async function submitOrderReport({ placeId, orderingUrl, success, bankId, cardLabel }) {
+async function submitOrderReport({
+  placeId,
+  orderingUrl,
+  success,
+  bankId,
+  cardLabel,
+  issueReason,
+  device,
+  browser,
+}) {
   if (!placeId) return null;
   const payload = {
     placeId,
@@ -608,6 +916,9 @@ async function submitOrderReport({ placeId, orderingUrl, success, bankId, cardLa
     success: !!success,
     cardInstitution: bankId || null,
     cardLabel: cardLabel || null,
+    issueReason: issueReason || null,
+    device: device || null,
+    browser: browser || null,
     createdAt: new Date().toISOString(),
   };
 
@@ -624,7 +935,38 @@ async function submitOrderReport({ placeId, orderingUrl, success, bankId, cardLa
 
   const data = await res.json().catch(() => null);
   if (data?.community) renderCommunityStats(data.community);
+  refreshCommunityFeed(placeId);
   return data;
+}
+
+async function submitSuccessOrderReport(p) {
+  if (!p?.placeId) return;
+  if (hasSubmittedOrderReportToday(p.placeId)) {
+    await redeemCommunityPromo(1);
+    return;
+  }
+  await submitOrderReport({
+    placeId: p.placeId,
+    orderingUrl: p.orderingUrl,
+    success: true,
+    device: orderReportDevice,
+    browser: orderReportBrowser,
+  });
+  markOrderReportSubmittedToday(p.placeId);
+}
+
+async function submitIssueOrderReport(p, issueReason) {
+  if (!p?.placeId) return;
+  if (hasSubmittedOrderReportToday(p.placeId)) return;
+  await submitOrderReport({
+    placeId: p.placeId,
+    orderingUrl: p.orderingUrl,
+    success: false,
+    issueReason,
+    device: issueReason === "paze_issues" ? orderReportDevice : null,
+    browser: issueReason === "paze_issues" ? orderReportBrowser : null,
+  });
+  markOrderReportSubmittedToday(p.placeId);
 }
 
 async function redeemCommunityPromo(count = 1) {
@@ -756,10 +1098,10 @@ async function openOrderModalFromPending() {
   }
 
   selectedBankId = BANKS[0]?.id || "";
-  orderCardLabelEl.value = "";
-  updateRemaining();
-  renderBankChoices();
-  setStep(1);
+  if (orderCardLabelEl) orderCardLabelEl.value = "";
+  resetOrderReportMeta();
+  updateOrderNoButtonLabel(currentPendingOrder.placeId);
+  showOrderStep("orderStep1");
 }
 
 function closeOrderModal({ keepPending = false } = {}) {
@@ -776,74 +1118,129 @@ function closeOrderModal({ keepPending = false } = {}) {
 function wireOrderModalUi() {
   orderModal = document.getElementById("orderModal");
   orderStep1El = document.getElementById("orderStep1");
+  orderStepYesQuickEl = document.getElementById("orderStepYesQuick");
   orderStep2El = document.getElementById("orderStep2");
+  orderStepIssueEl = document.getElementById("orderStepIssue");
+  orderStepIssuePazeEl = document.getElementById("orderStepIssuePaze");
   orderStep3El = document.getElementById("orderStep3");
   orderBankGridEl = document.getElementById("orderBankGrid");
   orderCardLabelEl = document.getElementById("orderCardLabel");
-  orderRemainingEl = document.getElementById("orderRemaining");
 
   if (!orderModal || !orderStep1El || !orderCardLabelEl) return;
 
   document.getElementById("orderModalClose")?.addEventListener("click", () => closeOrderModal());
-  document.getElementById("orderYesBtn")?.addEventListener("click", () => setStep(2));
-  document.getElementById("orderNoBtn")?.addEventListener("click", async () => {
+  document.getElementById("orderYesBtn")?.addEventListener("click", () => {
+    resetOrderReportMeta();
+    showOrderStep("orderStepYesQuick");
+  });
+  document.getElementById("orderNoBtn")?.addEventListener("click", () => {
+    const placeId = currentPendingOrder?.placeId;
+    if (placeId) markOrderModalDismissed(placeId);
+    closeOrderModal();
+  });
+  document.getElementById("orderReportIssueBtn")?.addEventListener("click", () => {
+    resetOrderReportMeta();
+    showOrderStep("orderStepIssue");
+  });
+  document.getElementById("orderYesConfirmBtn")?.addEventListener("click", async () => {
     const p = currentPendingOrder;
     if (!p?.placeId) return;
     try {
-      if (!hasSubmittedOrderReportToday(p.placeId)) {
-        await submitOrderReport({
-          placeId: p.placeId,
-          orderingUrl: p.orderingUrl,
-          success: false,
-        });
-        markOrderReportSubmittedToday(p.placeId);
-      }
-    } finally {
-      closeOrderModal();
+      await submitSuccessOrderReport(p);
+      showOrderStep("orderStep3");
+    } catch (e) {
+      alert(String(e?.message || e));
+    }
+  });
+  document.getElementById("orderTrackCardBtn")?.addEventListener("click", () => {
+    showOrderCardStep().catch((e) => alert(String(e?.message || e)));
+  });
+  document.getElementById("orderAddNewCardBtn")?.addEventListener("click", () => {
+    setOrderNewCardMode(!orderNewCardMode);
+    if (orderNewCardMode) orderPickerSelectedCardId = null;
+    renderOrderCardPicker();
+  });
+  document.getElementById("orderIssueNotTakingBtn")?.addEventListener("click", async () => {
+    const p = currentPendingOrder;
+    if (!p?.placeId) return;
+    try {
+      await submitIssueOrderReport(p, "not_taking_orders");
+      showOrderStep("orderStep3");
+    } catch (e) {
+      alert(String(e?.message || e));
+    }
+  });
+  document.getElementById("orderIssuePazeBtn")?.addEventListener("click", () => {
+    resetOrderReportMeta();
+    showOrderStep("orderStepIssuePaze");
+  });
+  document.getElementById("orderIssueSubmitBtn")?.addEventListener("click", async () => {
+    const p = currentPendingOrder;
+    if (!p?.placeId) return;
+    try {
+      await submitIssueOrderReport(p, "paze_issues");
+      showOrderStep("orderStep3");
+    } catch (e) {
+      alert(String(e?.message || e));
     }
   });
   document.getElementById("orderSubmitBtn")?.addEventListener("click", async () => {
     const p = currentPendingOrder;
     if (!p?.placeId) return;
-    const label = (orderCardLabelEl.value || "").trim();
-    if (!selectedBankId || !label) {
-      alert("Please enter a card label.");
-      return;
+
+    let bankId = "";
+    let label = "";
+    let cardId = null;
+
+    if (orderNewCardMode) {
+      label = (orderCardLabelEl.value || "").trim();
+      bankId = selectedBankId;
+      if (!bankId || !label) {
+        alert("Please enter a card label.");
+        return;
+      }
+    } else {
+      const picked = getTrackableCards().find((c) => c.id === orderPickerSelectedCardId);
+      if (!picked) {
+        alert("Please choose a card.");
+        return;
+      }
+      bankId = picked.bankId;
+      label = picked.label;
+      if (authState.user) cardId = picked.id;
     }
 
     try {
       if (authState.user) {
-        const matched = findCard(syncedCards, selectedBankId, label);
         await logSyncedPromoUse({
-          cardId: matched?.id || null,
-          bankId: selectedBankId,
+          cardId,
+          bankId,
           label,
           placeId: p.placeId,
         });
       } else {
-        // Guest fallback: local remaining counter only.
         const cards = getUserCards();
-        let card = findCard(cards, selectedBankId, label);
+        let card = findCard(cards, bankId, label);
         if (!card) {
-          card = { bankId: selectedBankId, label, usedCount: 0 };
+          card = { bankId, label, usedCount: 0 };
           cards.push(card);
         }
         card.usedCount = (card.usedCount || 0) + 1;
         setUserCards(cards);
       }
-      updateRemaining();
 
       if (!hasSubmittedOrderReportToday(p.placeId)) {
         await submitOrderReport({
           placeId: p.placeId,
           orderingUrl: p.orderingUrl,
           success: true,
-          bankId: selectedBankId,
+          bankId,
           cardLabel: label,
+          device: orderReportDevice,
+          browser: orderReportBrowser,
         });
         markOrderReportSubmittedToday(p.placeId);
       } else {
-        // Place report already counted today; still record the promo use globally.
         await redeemCommunityPromo(1);
       }
     } catch (e) {
@@ -854,8 +1251,6 @@ function wireOrderModalUi() {
     setStep(3);
   });
   document.getElementById("orderDoneBtn")?.addEventListener("click", () => closeOrderModal());
-
-  orderCardLabelEl.addEventListener("input", () => updateRemaining());
 }
 
 document.getElementById("historyModalClose")?.addEventListener("click", () => closeHistoryModal());
@@ -872,27 +1267,64 @@ function safeDomId(placeId) {
   return `community_${placeId.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
 }
 
-async function refreshCommunityStats(placeId) {
+async function refreshCommunityFeed(placeId) {
   if (!placeId) return;
   const popupEl = popup.getElement();
   if (!popupEl) return;
 
-  const domId = safeDomId(placeId);
-  const el = popupEl.querySelector(`#${domId}`);
-  if (!el) return;
+  const block = popupEl.querySelector(`#${safeDomId(placeId)}`);
+  if (!block) return;
 
-  el.textContent = "Community: loading...";
+  const summaryEl = block.querySelector(".popup-community-summary");
+  const toggleEl = block.querySelector(".popup-reports-toggle");
+  const listEl = block.querySelector(".popup-reports-list");
+  if (summaryEl) summaryEl.textContent = "Community: loading...";
+
   const res = await fetch(`/api/order-report-stats?placeId=${encodeURIComponent(placeId)}`);
   if (!res.ok) return;
-  const stats = await res.json();
+  const feed = await res.json();
 
-  if (!stats?.total) {
-    el.textContent = "Community: no reports yet";
+  if (!feed?.total) {
+    if (summaryEl) summaryEl.textContent = "Community: no reports yet";
+    if (toggleEl) toggleEl.hidden = true;
+    if (listEl) {
+      listEl.hidden = true;
+      listEl.innerHTML = "";
+    }
     return;
   }
 
-  const pct = Math.round((stats.yes / stats.total) * 100);
-  el.textContent = `Community: ${pct}% success (${stats.yes} yes / ${stats.no} no)`;
+  const pct = Math.round((feed.yes / feed.total) * 100);
+  if (summaryEl) {
+    summaryEl.textContent = `Community: ${pct}% success (${feed.yes} yes / ${feed.no} no)`;
+  }
+
+  const recent = Array.isArray(feed.recent) ? feed.recent : [];
+  if (!toggleEl || !listEl) return;
+
+  if (!recent.length) {
+    toggleEl.hidden = true;
+    listEl.hidden = true;
+    listEl.innerHTML = "";
+    return;
+  }
+
+  toggleEl.hidden = false;
+  toggleEl.textContent = "Recent community reports";
+  toggleEl.setAttribute("aria-expanded", "false");
+  listEl.hidden = true;
+  listEl.innerHTML = recent
+    .map((report) => {
+      const tone = report.success ? "positive" : "negative";
+      return `<li class="popup-report popup-report--${tone}">${escapeHtml(formatReportText(report))}</li>`;
+    })
+    .join("");
+
+  toggleEl.onclick = () => {
+    const open = listEl.hidden;
+    listEl.hidden = !open;
+    toggleEl.setAttribute("aria-expanded", String(open));
+  };
 }
 
 function wireOrderingLinkHandler(p) {
@@ -1160,7 +1592,13 @@ function buildPopupInnerHtml(p, photoState) {
     : "";
 
   const community = communityDomId
-    ? `<p class="popup-community" id="${communityDomId}">Community: -</p>`
+    ? `<div class="popup-community-block" id="${communityDomId}">
+        <p class="popup-community-summary">Community: -</p>
+        <button type="button" class="popup-reports-toggle" hidden>
+          Recent community reports
+        </button>
+        <ul class="popup-reports-list" hidden></ul>
+      </div>`
     : "";
 
   let galleryBlock;
@@ -1193,6 +1631,14 @@ function buildPopupInnerHtml(p, photoState) {
     </div>`;
 }
 
+function wirePopupAfterHtmlUpdate(p) {
+  const popupEl = popup.getElement();
+  if (!popupEl) return;
+  wirePopupGallery(popupEl);
+  wireOrderingLinkHandler(p);
+  refreshCommunityFeed(p.id);
+}
+
 function showPopup(feature) {
   const p = feature.properties;
   const [lng, lat] = feature.geometry.coordinates;
@@ -1202,23 +1648,18 @@ function showPopup(feature) {
     .setHTML(buildPopupInnerHtml(p, "loading"))
     .addTo(map);
 
-  const popupEl = popup.getElement();
-  if (popupEl) wirePopupGallery(popupEl);
-  if (popupEl) wireOrderingLinkHandler(p);
-  refreshCommunityStats(p.id);
+  wirePopupAfterHtmlUpdate(p);
 
   loadPlaceImages(feature)
     .then((data) => {
       if (!popup.isOpen()) return;
       popup.setHTML(buildPopupInnerHtml(p, data));
-      const el = popup.getElement();
-      if (el) wirePopupGallery(el);
-      if (el) wireOrderingLinkHandler(p);
-      refreshCommunityStats(p.id);
+      wirePopupAfterHtmlUpdate(p);
     })
     .catch(() => {
       if (!popup.isOpen()) return;
       popup.setHTML(buildPopupInnerHtml(p, "error"));
+      wirePopupAfterHtmlUpdate(p);
     });
 }
 

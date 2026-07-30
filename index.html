@@ -4,6 +4,24 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>PazeTracker - Clover merchants map</title>
+    <meta
+      name="description"
+      content="Find US Clover merchants where Paze can appear at checkout. Browse community order reports and optionally track promo usage."
+    />
+    <meta name="robots" content="index, follow" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="PazeTracker" />
+    <meta property="og:title" content="PazeTracker - Clover merchants map" />
+    <meta
+      property="og:description"
+      content="Find US Clover merchants where Paze can appear at checkout. Browse community order reports and optionally track promo usage."
+    />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="PazeTracker - Clover merchants map" />
+    <meta
+      name="twitter:description"
+      content="Find US Clover merchants where Paze can appear at checkout. Browse community order reports and optionally track promo usage."
+    />
     <link
       rel="stylesheet"
       href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css"
@@ -58,6 +76,9 @@
               </svg>
             </button>
           </div>
+          <p class="community-stat-note" id="communityStatNote">
+            Community reports are new. Help others by reporting after you order.
+          </p>
 
           <div class="community-stat-flipper" id="communityStatFlipper">
             <div class="community-stat-face community-stat-face--front">
@@ -228,30 +249,92 @@
 
         <section id="orderStep1" class="order-step">
           <p class="order-question">
-            Did you successfully place your Clover order (so the Paze/checkout worked)?
+            Did you successfully place your Clover order (Paze/checkout worked)?
           </p>
           <div class="order-actions">
             <button id="orderYesBtn" type="button" class="btn">
-              Yes, it went through
+              Yes, it worked
             </button>
             <button id="orderNoBtn" type="button" class="btn btn-ghost">
-              No, it did not
+              No, still browsing
+            </button>
+          </div>
+          <button id="orderReportIssueBtn" type="button" class="order-link-btn">
+            Report an issue for others
+          </button>
+        </section>
+
+        <section id="orderStepYesQuick" class="order-step" hidden>
+          <p class="order-question order-question--soft">
+            Optional — helps others know what worked.
+          </p>
+          <div class="order-chip-group">
+            <span class="order-chip-label">Device</span>
+            <div class="order-chip-row" id="orderDeviceChips" role="group" aria-label="Device type"></div>
+          </div>
+          <div class="order-chip-group">
+            <span class="order-chip-label">Browser</span>
+            <div class="order-chip-row" id="orderBrowserChips" role="group" aria-label="Browser"></div>
+          </div>
+          <div class="order-actions">
+            <button id="orderYesConfirmBtn" type="button" class="btn">
+              Confirm success
+            </button>
+          </div>
+          <button id="orderTrackCardBtn" type="button" class="order-link-btn">
+            Track this promo on a card
+          </button>
+        </section>
+
+        <section id="orderStepIssue" class="order-step" hidden>
+          <p class="order-question">What went wrong?</p>
+          <div class="order-actions order-actions--stack">
+            <button id="orderIssueNotTakingBtn" type="button" class="btn btn-ghost">
+              Not taking online orders
+            </button>
+            <button id="orderIssuePazeBtn" type="button" class="btn btn-ghost">
+              Paze / checkout issues
+            </button>
+          </div>
+        </section>
+
+        <section id="orderStepIssuePaze" class="order-step" hidden>
+          <p class="order-question order-question--soft">
+            Optional details for Paze/checkout issues.
+          </p>
+          <div class="order-chip-group">
+            <span class="order-chip-label">Device</span>
+            <div class="order-chip-row" id="orderIssueDeviceChips" role="group" aria-label="Device type"></div>
+          </div>
+          <div class="order-chip-group">
+            <span class="order-chip-label">Browser</span>
+            <div class="order-chip-row" id="orderIssueBrowserChips" role="group" aria-label="Browser"></div>
+          </div>
+          <div class="order-actions">
+            <button id="orderIssueSubmitBtn" type="button" class="btn">
+              Submit report
             </button>
           </div>
         </section>
 
         <section id="orderStep2" class="order-step" hidden>
-          <p class="order-question">
-            Choose the card you used for the Paze promo (10 plays per card).
+          <p class="order-question">Which card did you use?</p>
+
+          <div id="orderSavedCardsList" class="order-saved-cards-list" hidden></div>
+          <p id="orderSavedCardsEmpty" class="order-saved-cards-empty" hidden>
+            No saved cards yet.
           </p>
 
-          <div
-            class="order-bank-grid"
-            id="orderBankGrid"
-            aria-label="Card institution selector"
-          ></div>
+          <button id="orderAddNewCardBtn" type="button" class="order-link-btn">
+            Add a new card
+          </button>
 
-          <div class="order-card-picker">
+          <div id="orderNewCardForm" class="order-new-card-form" hidden>
+            <div
+              class="order-bank-grid"
+              id="orderBankGrid"
+              aria-label="Card institution selector"
+            ></div>
             <label class="field">
               <span>Card label (e.g. "Chase debit")</span>
               <input
@@ -261,12 +344,14 @@
                 autocomplete="off"
               />
             </label>
-            <div class="order-remaining" id="orderRemaining">Remaining: -</div>
+            <p class="order-new-card-note">
+              New cards start at 10 remaining promos. Edit anytime under Sync Cards.
+            </p>
           </div>
 
           <div class="order-actions">
             <button id="orderSubmitBtn" type="button" class="btn">
-              Submit success + update remaining
+              Log promo use
             </button>
           </div>
         </section>
