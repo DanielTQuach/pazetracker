@@ -246,14 +246,14 @@ export async function bumpPromoRedeemed(count = 1) {
 
 async function mapCardRow(cardRow, usesRows) {
   return normalizeCard({
-    id: cardRow.id,
+    id: String(cardRow.id),
     bankId: cardRow.bank_id,
     label: cardRow.label,
     remainingCount: cardRow.remaining_count,
     createdAt: toIso(cardRow.created_at),
     updatedAt: toIso(cardRow.updated_at),
     uses: usesRows.map((u) => ({
-      id: u.id,
+      id: String(u.id),
       promoNumber: u.promo_number,
       usedAt: toDateKey(u.used_at),
       receivedAt: toDateKey(u.received_at),
@@ -288,13 +288,14 @@ export async function getUserCards(userId) {
 
   const usesByCard = new Map();
   for (const use of uses) {
-    const list = usesByCard.get(use.card_id) || [];
+    const key = String(use.card_id);
+    const list = usesByCard.get(key) || [];
     list.push(use);
-    usesByCard.set(use.card_id, list);
+    usesByCard.set(key, list);
   }
 
   return Promise.all(
-    cards.map((card) => mapCardRow(card, usesByCard.get(card.id) || []))
+    cards.map((card) => mapCardRow(card, usesByCard.get(String(card.id)) || []))
   );
 }
 

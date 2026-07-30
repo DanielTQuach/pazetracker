@@ -277,28 +277,6 @@
           </button>
         </section>
 
-        <section id="orderStepYesQuick" class="order-step" hidden>
-          <p class="order-question order-question--soft">
-            Optional — helps others know what worked.
-          </p>
-          <div class="order-chip-group">
-            <span class="order-chip-label">Device</span>
-            <div class="order-chip-row" id="orderDeviceChips" role="group" aria-label="Device type"></div>
-          </div>
-          <div class="order-chip-group">
-            <span class="order-chip-label">Browser</span>
-            <div class="order-chip-row" id="orderBrowserChips" role="group" aria-label="Browser"></div>
-          </div>
-          <div class="order-actions">
-            <button id="orderYesConfirmBtn" type="button" class="btn">
-              Confirm success
-            </button>
-          </div>
-          <button id="orderTrackCardBtn" type="button" class="order-link-btn">
-            Track this promo on a card
-          </button>
-        </section>
-
         <section id="orderStepIssue" class="order-step" hidden>
           <p class="order-question">What went wrong?</p>
           <div class="order-actions order-actions--stack">
@@ -331,7 +309,22 @@
         </section>
 
         <section id="orderStep2" class="order-step" hidden>
+          <p class="order-question order-question--soft">
+            Optional — helps others know what worked.
+          </p>
+          <div class="order-chip-group">
+            <span class="order-chip-label">Device</span>
+            <div class="order-chip-row" id="orderDeviceChips" role="group" aria-label="Device type"></div>
+          </div>
+          <div class="order-chip-group">
+            <span class="order-chip-label">Browser</span>
+            <div class="order-chip-row" id="orderBrowserChips" role="group" aria-label="Browser"></div>
+          </div>
+
           <p class="order-question">Which card did you use?</p>
+          <p class="order-card-hint">
+            Optional. Pick a saved card or add a new one.
+          </p>
 
           <div id="orderSavedCardsList" class="order-saved-cards-list" hidden></div>
           <p id="orderSavedCardsEmpty" class="order-saved-cards-empty" hidden>
@@ -364,9 +357,12 @@
 
           <div class="order-actions">
             <button id="orderSubmitBtn" type="button" class="btn">
-              Log promo use
+              Confirm success
             </button>
           </div>
+          <button id="orderSkipCardBtn" type="button" class="order-link-btn">
+            Confirm without tracking a card
+          </button>
         </section>
 
         <section id="orderStep3" class="order-step" hidden>

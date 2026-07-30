@@ -961,6 +961,13 @@ body {
   font-size: 0.92rem;
 }
 
+.order-card-hint {
+  margin: -4px 0 12px;
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.35;
+}
+
 .order-link-btn {
   margin-top: 12px;
   padding: 0;
@@ -1074,6 +1081,12 @@ body {
   flex-direction: column;
   gap: 8px;
   margin-bottom: 10px;
+}
+
+.order-saved-cards-list[hidden],
+.order-saved-cards-empty[hidden],
+.order-new-card-form[hidden] {
+  display: none !important;
 }
 
 .order-saved-cards-empty {

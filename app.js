@@ -89,7 +89,6 @@ const REPORT_BROWSER_OPTIONS = [
 
 const ORDER_STEP_IDS = [
   "orderStep1",
-  "orderStepYesQuick",
   "orderStep2",
   "orderStepIssue",
   "orderStepIssuePaze",
@@ -112,7 +111,6 @@ const BANKS = [
 
 let orderModal = null;
 let orderStep1El = null;
-let orderStepYesQuickEl = null;
 let orderStep2El = null;
 let orderStepIssueEl = null;
 let orderStepIssuePazeEl = null;
@@ -762,14 +760,16 @@ function renderSidebarBankChoices() {
 }
 
 function getTrackableCards() {
-  if (authState.user) {
-    return syncedCards.map((card) => ({
-      id: card.id,
-      bankId: card.bankId,
-      label: card.label,
-      remainingCount: clampRemaining(card.remainingCount),
-    }));
-  }
+  const fromSynced = (authState.user ? syncedCards : []).map((card) => ({
+    id: String(card.id),
+    bankId: card.bankId,
+    label: card.label,
+    remainingCount: clampRemaining(card.remainingCount),
+  }));
+
+  if (fromSynced.length) return fromSynced;
+
+  // Guest cards (local), or signed-in fallback if sync list is empty.
   return getUserCards().map((card) => ({
     id: `${card.bankId}|${card.label}`,
     bankId: card.bankId,
@@ -793,8 +793,12 @@ function setOrderNewCardMode(enabled) {
   if (emptyEl) emptyEl.hidden = orderNewCardMode || cards.length > 0;
   if (formEl) formEl.hidden = !orderNewCardMode;
   if (toggleBtn) {
-    toggleBtn.hidden = cards.length === 0;
-    toggleBtn.textContent = orderNewCardMode ? "Use a saved card" : "Add a new card";
+    toggleBtn.hidden = false;
+    toggleBtn.textContent = orderNewCardMode
+      ? cards.length
+        ? "Use a saved card"
+        : "Hide new card form"
+      : "Add a new card";
   }
 }
 
@@ -814,6 +818,16 @@ function renderOrderCardPicker() {
     return;
   }
 
+  if (
+    orderPickerSelectedCardId &&
+    !cards.some((c) => c.id === String(orderPickerSelectedCardId))
+  ) {
+    orderPickerSelectedCardId = null;
+  }
+  if (!orderNewCardMode && !orderPickerSelectedCardId) {
+    orderPickerSelectedCardId = cards[0].id;
+  }
+
   emptyEl.hidden = true;
   listEl.hidden = orderNewCardMode;
 
@@ -822,7 +836,9 @@ function renderOrderCardPicker() {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "order-pick-card";
-    if (card.id === orderPickerSelectedCardId) btn.classList.add("is-selected");
+    if (String(card.id) === String(orderPickerSelectedCardId)) {
+      btn.classList.add("is-selected");
+    }
     btn.innerHTML = `
       <div class="order-bank-simulated-card">${bankShortHtml(bank.short)}</div>
       <div>
@@ -831,17 +847,11 @@ function renderOrderCardPicker() {
       </div>
     `;
     btn.addEventListener("click", () => {
-      orderPickerSelectedCardId = card.id;
-      setOrderNewCardMode(false);
+      orderPickerSelectedCardId = String(card.id);
+      orderNewCardMode = false;
       renderOrderCardPicker();
     });
     listEl.appendChild(btn);
-  }
-
-  if (!orderNewCardMode && !orderPickerSelectedCardId && cards.length) {
-    orderPickerSelectedCardId = cards[0].id;
-    renderOrderCardPicker();
-    return;
   }
 
   setOrderNewCardMode(orderNewCardMode);
@@ -851,17 +861,103 @@ async function showOrderCardStep() {
   if (authState.user) {
     try {
       await loadSyncedCards();
-    } catch {
-      // use cached synced cards
+    } catch (err) {
+      console.error("Failed to load synced cards for order modal", err);
     }
   }
+
   orderPickerSelectedCardId = null;
-  orderNewCardMode = getTrackableCards().length === 0;
+  const cards = getTrackableCards();
+  orderNewCardMode = cards.length === 0;
   selectedBankId = BANKS[0]?.id || "";
   if (orderCardLabelEl) orderCardLabelEl.value = "";
+  resetOrderReportMeta();
   renderBankChoices();
   renderOrderCardPicker();
   setStep(2);
+}
+
+async function confirmSuccessWithOptionalCard({ requireCard = false } = {}) {
+  const p = currentPendingOrder;
+  if (!p?.placeId) return;
+
+  let bankId = null;
+  let label = null;
+  let cardId = null;
+  let shouldTrackCard = false;
+
+  if (orderNewCardMode) {
+    label = (orderCardLabelEl?.value || "").trim();
+    bankId = selectedBankId;
+    if (!bankId || !label) {
+      if (requireCard) {
+        alert("Please enter a card label.");
+        return;
+      }
+    } else {
+      shouldTrackCard = true;
+    }
+  } else if (orderPickerSelectedCardId) {
+    const picked = getTrackableCards().find(
+      (c) => String(c.id) === String(orderPickerSelectedCardId)
+    );
+    if (picked) {
+      bankId = picked.bankId;
+      label = picked.label;
+      if (authState.user) cardId = picked.id;
+      shouldTrackCard = true;
+    } else if (requireCard) {
+      alert("Please choose a card.");
+      return;
+    }
+  } else if (requireCard) {
+    alert("Please choose a card.");
+    return;
+  }
+
+  try {
+    if (shouldTrackCard && bankId && label) {
+      if (authState.user) {
+        await logSyncedPromoUse({
+          cardId,
+          bankId,
+          label,
+          placeId: p.placeId,
+        });
+      } else {
+        const cards = getUserCards();
+        let card = findCard(cards, bankId, label);
+        if (!card) {
+          card = { bankId, label, usedCount: 0 };
+          cards.push(card);
+        }
+        card.usedCount = (card.usedCount || 0) + 1;
+        setUserCards(cards);
+      }
+    }
+
+    if (!hasSubmittedOrderReportToday(p.placeId)) {
+      await submitOrderReport({
+        placeId: p.placeId,
+        orderingUrl: p.orderingUrl,
+        success: true,
+        bankId: shouldTrackCard ? bankId : null,
+        cardLabel: shouldTrackCard ? label : null,
+        device: orderReportDevice,
+        browser: orderReportBrowser,
+      });
+      markOrderReportSubmittedToday(p.placeId);
+    } else if (shouldTrackCard) {
+      await redeemCommunityPromo(1);
+    } else {
+      // Already reported today; nothing else required.
+    }
+  } catch (e) {
+    alert(String(e?.message || e));
+    return;
+  }
+
+  setStep(3);
 }
 
 function getBankById(bankId) {
@@ -955,22 +1051,6 @@ async function submitOrderReport({
   if (data?.community) renderCommunityStats(data.community);
   refreshCommunityFeed(placeId);
   return data;
-}
-
-async function submitSuccessOrderReport(p) {
-  if (!p?.placeId) return;
-  if (hasSubmittedOrderReportToday(p.placeId)) {
-    await redeemCommunityPromo(1);
-    return;
-  }
-  await submitOrderReport({
-    placeId: p.placeId,
-    orderingUrl: p.orderingUrl,
-    success: true,
-    device: orderReportDevice,
-    browser: orderReportBrowser,
-  });
-  markOrderReportSubmittedToday(p.placeId);
 }
 
 async function submitIssueOrderReport(p, issueReason) {
@@ -1136,7 +1216,6 @@ function closeOrderModal({ keepPending = false } = {}) {
 function wireOrderModalUi() {
   orderModal = document.getElementById("orderModal");
   orderStep1El = document.getElementById("orderStep1");
-  orderStepYesQuickEl = document.getElementById("orderStepYesQuick");
   orderStep2El = document.getElementById("orderStep2");
   orderStepIssueEl = document.getElementById("orderStepIssue");
   orderStepIssuePazeEl = document.getElementById("orderStepIssuePaze");
@@ -1144,12 +1223,11 @@ function wireOrderModalUi() {
   orderBankGridEl = document.getElementById("orderBankGrid");
   orderCardLabelEl = document.getElementById("orderCardLabel");
 
-  if (!orderModal || !orderStep1El || !orderCardLabelEl) return;
+  if (!orderModal || !orderStep1El) return;
 
   document.getElementById("orderModalClose")?.addEventListener("click", () => closeOrderModal());
   document.getElementById("orderYesBtn")?.addEventListener("click", () => {
-    resetOrderReportMeta();
-    showOrderStep("orderStepYesQuick");
+    showOrderCardStep().catch((e) => alert(String(e?.message || e)));
   });
   document.getElementById("orderNoBtn")?.addEventListener("click", () => {
     const placeId = currentPendingOrder?.placeId;
@@ -1160,22 +1238,15 @@ function wireOrderModalUi() {
     resetOrderReportMeta();
     showOrderStep("orderStepIssue");
   });
-  document.getElementById("orderYesConfirmBtn")?.addEventListener("click", async () => {
-    const p = currentPendingOrder;
-    if (!p?.placeId) return;
-    try {
-      await submitSuccessOrderReport(p);
-      showOrderStep("orderStep3");
-    } catch (e) {
-      alert(String(e?.message || e));
-    }
-  });
-  document.getElementById("orderTrackCardBtn")?.addEventListener("click", () => {
-    showOrderCardStep().catch((e) => alert(String(e?.message || e)));
-  });
   document.getElementById("orderAddNewCardBtn")?.addEventListener("click", () => {
-    setOrderNewCardMode(!orderNewCardMode);
-    if (orderNewCardMode) orderPickerSelectedCardId = null;
+    const cards = getTrackableCards();
+    if (orderNewCardMode && cards.length) {
+      orderNewCardMode = false;
+      if (!orderPickerSelectedCardId) orderPickerSelectedCardId = cards[0].id;
+    } else {
+      orderNewCardMode = true;
+      orderPickerSelectedCardId = null;
+    }
     renderOrderCardPicker();
   });
   document.getElementById("orderIssueNotTakingBtn")?.addEventListener("click", async () => {
@@ -1203,70 +1274,14 @@ function wireOrderModalUi() {
     }
   });
   document.getElementById("orderSubmitBtn")?.addEventListener("click", async () => {
-    const p = currentPendingOrder;
-    if (!p?.placeId) return;
-
-    let bankId = "";
-    let label = "";
-    let cardId = null;
-
-    if (orderNewCardMode) {
-      label = (orderCardLabelEl.value || "").trim();
-      bankId = selectedBankId;
-      if (!bankId || !label) {
-        alert("Please enter a card label.");
-        return;
-      }
-    } else {
-      const picked = getTrackableCards().find((c) => c.id === orderPickerSelectedCardId);
-      if (!picked) {
-        alert("Please choose a card.");
-        return;
-      }
-      bankId = picked.bankId;
-      label = picked.label;
-      if (authState.user) cardId = picked.id;
-    }
-
-    try {
-      if (authState.user) {
-        await logSyncedPromoUse({
-          cardId,
-          bankId,
-          label,
-          placeId: p.placeId,
-        });
-      } else {
-        const cards = getUserCards();
-        let card = findCard(cards, bankId, label);
-        if (!card) {
-          card = { bankId, label, usedCount: 0 };
-          cards.push(card);
-        }
-        card.usedCount = (card.usedCount || 0) + 1;
-        setUserCards(cards);
-      }
-
-      if (!hasSubmittedOrderReportToday(p.placeId)) {
-        await submitOrderReport({
-          placeId: p.placeId,
-          orderingUrl: p.orderingUrl,
-          success: true,
-          bankId,
-          cardLabel: label,
-          device: orderReportDevice,
-          browser: orderReportBrowser,
-        });
-        markOrderReportSubmittedToday(p.placeId);
-      } else {
-        await redeemCommunityPromo(1);
-      }
-    } catch (e) {
-      alert(String(e?.message || e));
-      return;
-    }
-
-    setStep(3);
+    await confirmSuccessWithOptionalCard({
+      requireCard: orderNewCardMode,
+    });
+  });
+  document.getElementById("orderSkipCardBtn")?.addEventListener("click", async () => {
+    orderNewCardMode = false;
+    orderPickerSelectedCardId = null;
+    await confirmSuccessWithOptionalCard({ requireCard: false });
   });
   document.getElementById("orderDoneBtn")?.addEventListener("click", () => closeOrderModal());
 }
