@@ -2080,9 +2080,11 @@ window.addEventListener("pageshow", (event) => {
 
 function setSidebarOpen(isOpen) {
   if (!sidebarPanelEl || !sidebarToggleEl || !sidebarBackdropEl) return;
-  sidebarPanelEl.classList.toggle("is-open", !!isOpen);
-  sidebarBackdropEl.hidden = !isOpen;
-  sidebarToggleEl.setAttribute("aria-expanded", String(!!isOpen));
+  const open = !!isOpen;
+  sidebarPanelEl.classList.toggle("is-open", open);
+  sidebarBackdropEl.hidden = !open;
+  sidebarToggleEl.setAttribute("aria-expanded", String(open));
+  sidebarToggleEl.setAttribute("aria-label", open ? "Close controls" : "Open controls");
 }
 
 function isMobileSidebar() {
@@ -2097,6 +2099,7 @@ function initMobileSidebar() {
       sidebarPanelEl.classList.remove("is-open");
       sidebarBackdropEl.hidden = true;
       sidebarToggleEl.setAttribute("aria-expanded", "false");
+      sidebarToggleEl.setAttribute("aria-label", "Open controls");
       return;
     }
     setSidebarOpen(false);

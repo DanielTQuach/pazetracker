@@ -38,7 +38,7 @@ body {
 .sidebar-toggle {
   display: none;
   position: fixed;
-  z-index: 1003;
+  z-index: 1004;
   left: 12px;
   top: 12px;
   padding: 0.55rem;
@@ -72,6 +72,24 @@ body {
   top: 0;
   background: var(--ink);
   box-shadow: 0 5px 0 var(--ink), 0 10px 0 var(--ink);
+}
+
+.sidebar-toggle[aria-expanded="true"] .hamburger::before {
+  top: 5px;
+  box-shadow: none;
+  transform: rotate(45deg);
+}
+
+.sidebar-toggle[aria-expanded="true"] .hamburger::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 5px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--ink);
+  transform: rotate(-45deg);
 }
 
 .sidebar-backdrop {
@@ -897,9 +915,14 @@ body {
     position: fixed;
     top: 0;
     left: 0;
+    /* Above backdrop (1002), below toggle (1004) so controls are tappable */
+    z-index: 1003;
     height: 100vh;
+    height: 100dvh;
     width: min(92vw, 380px);
     box-shadow: var(--shadow);
+    padding-top: 4rem;
+    -webkit-overflow-scrolling: touch;
   }
 
   .panel.is-open {
@@ -918,6 +941,7 @@ body {
 
   #map {
     min-height: 100vh;
+    min-height: 100dvh;
   }
 }
 
