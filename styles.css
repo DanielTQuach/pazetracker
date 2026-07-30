@@ -144,7 +144,7 @@ body {
     rgba(15, 107, 92, 0.1),
     rgba(255, 255, 255, 0.72)
   );
-  perspective: 900px;
+  perspective: 1000px;
 }
 
 .community-stat-top {
@@ -167,10 +167,16 @@ body {
   color: var(--muted);
   font-size: 0.86rem;
   line-height: 1.35;
+  transition: opacity 0.2s ease, max-height 0.25s ease, margin 0.25s ease;
+  max-height: 4rem;
+  overflow: hidden;
 }
 
 .community-stat.is-flipped .community-stat-note {
-  display: none;
+  opacity: 0;
+  max-height: 0;
+  margin: 0;
+  pointer-events: none;
 }
 
 .community-stat-flip {
@@ -196,13 +202,18 @@ body {
   width: 14px;
   height: 14px;
   display: block;
+  transition: transform 0.45s ease;
+}
+
+.community-stat.is-flipped .community-stat-flip-icon {
+  transform: rotate(180deg);
 }
 
 .community-stat-flipper {
   position: relative;
   margin-top: 0.35rem;
-  transition: transform 0.45s ease;
   transform-style: preserve-3d;
+  transition: transform 0.5s cubic-bezier(0.4, 0.1, 0.2, 1);
 }
 
 .community-stat.is-flipped .community-stat-flipper {
@@ -210,8 +221,17 @@ body {
 }
 
 .community-stat-face {
+  width: 100%;
   backface-visibility: hidden;
   -webkit-backface-visibility: hidden;
+  /* Opaque fill so the opposite face never bleeds through during/after the flip */
+  background: linear-gradient(180deg, #e7f1ee, #f6f3ec);
+  border-radius: 8px;
+}
+
+.community-stat-face--front {
+  position: relative;
+  transform: rotateY(0deg);
 }
 
 .community-stat-face--back {
@@ -258,26 +278,34 @@ body {
 }
 
 .community-mini {
-  padding: 0.35rem 0.2rem;
+  padding: 0.35rem 0.15rem;
+  min-width: 0;
 }
 
 .community-mini-label {
   color: var(--muted);
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   font-weight: 800;
   letter-spacing: 0.03em;
   text-transform: uppercase;
+  line-height: 1.25;
+  min-height: 2.5em;
 }
 
 .community-mini-value {
-  margin-top: 0.2rem;
+  margin-top: 0.15rem;
   font-weight: 800;
+  min-width: 0;
 }
 
 .community-mini-value strong {
+  display: block;
   color: var(--accent);
   font-family: var(--font-display);
-  font-size: 1.25rem;
+  font-size: clamp(0.95rem, 4.2vw, 1.2rem);
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .field {
