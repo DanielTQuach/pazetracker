@@ -21,6 +21,8 @@ Used for popup photos, search result thumbnails, and ratings.
 - `GOOGLE_MAPS_API_KEY`
 - Enable **Places API (New)**
 
+**Railway / server:** this app calls Places from Node (no browser referrer). In Google Cloud → API key → Application restrictions, use **None** (or IP addresses — not HTTP referrers). API restrictions: **Places API (New)** only. Referrer-locked keys fail with `API_KEY_HTTP_REFERRER_BLOCKED`.
+
 ### Clerk
 
 Used for **optional sign-in** and **synced card tracking across devices**.
@@ -76,6 +78,20 @@ npm run db:migrate
 ```
 
 Schema lives in `db/schema.sql`. The server picks Postgres automatically when `DATABASE_URL` is set (`/api/config` reports `dataStore: "postgres"`).
+
+## Redis rate limits (Railway)
+
+Used only for short-lived anti-abuse counters on crowd write endpoints (`POST /api/order-report`, `POST /api/promo-redeem`). Durable data stays in Postgres.
+
+Without `REDIS_URL`, limits use in-memory counters (fine locally / single instance).
+
+1. Project canvas → **+ New** → **Database** → **Redis**
+2. On the app service **Variables**, add `REDIS_URL` referencing the Redis service (e.g. `${{Redis.REDIS_URL}}`)
+3. Redeploy — no migrate step
+
+`/api/config` reports `rateLimit: "redis"` or `"memory"`.
+
+Order reports: up to **3 per restaurant per IP per UTC day**, and **30 total per IP per 24h** (abuse guard). Card promo logging can still work after that cap via a separate endpoint, but extra crowd report rows stop.
 
 ## Data
 
