@@ -45,6 +45,8 @@ const authActionsEl = document.getElementById("authActions");
 const userSummaryEl = document.getElementById("userSummary");
 const userSummaryTextEl = document.getElementById("userSummaryText");
 const cardManagerEl = document.getElementById("cardManager");
+const cardFormToggleEl = document.getElementById("cardFormToggle");
+const cardFormPanelEl = document.getElementById("cardFormPanel");
 const cardsListEl = document.getElementById("cardsList");
 const cardsEmptyEl = document.getElementById("cardsEmpty");
 const sidebarBankGridEl = document.getElementById("sidebarBankGrid");
@@ -56,6 +58,7 @@ const historyListEl = document.getElementById("historyList");
 const historyEmptyEl = document.getElementById("historyEmpty");
 
 let historyCardId = null;
+let isCardFormOpen = false;
 
 let allFeatures = [];
 let popup = new maplibregl.Popup({
@@ -345,11 +348,23 @@ function renderAuthUi() {
   renderPersonalStats();
 }
 
+function setCardFormOpen(isOpen) {
+  isCardFormOpen = !!isOpen;
+  if (cardFormPanelEl) cardFormPanelEl.hidden = !isCardFormOpen;
+  if (cardFormToggleEl) {
+    cardFormToggleEl.setAttribute("aria-expanded", String(isCardFormOpen));
+    cardFormToggleEl.classList.toggle("is-open", isCardFormOpen);
+    const labelEl = cardFormToggleEl.querySelector("span");
+    if (labelEl) labelEl.textContent = isCardFormOpen ? "Hide add card" : "Add a card";
+  }
+}
+
 async function loadSyncedCards() {
   const res = await authedFetch("/api/user-cards");
   if (!res.ok) throw new Error("Failed to load synced cards");
   const data = await res.json();
   syncedCards = Array.isArray(data.cards) ? data.cards : [];
+  if (!syncedCards.length) setCardFormOpen(true);
   renderSyncedCards();
   renderPersonalStats();
 }
@@ -378,6 +393,7 @@ async function saveSyncedCard() {
   const data = await res.json();
   syncedCards = Array.isArray(data.cards) ? data.cards : [];
   selectedSyncedCardId = payload.id || data.savedCardId || null;
+  setCardFormOpen(false);
   renderSyncedCards();
   renderPersonalStats();
 }
@@ -389,6 +405,7 @@ function resetCardForm() {
   if (sidebarCardRemainingEl) sidebarCardRemainingEl.value = "10";
   renderSidebarBankChoices();
   renderSyncedCards();
+  setCardFormOpen(true);
 }
 
 function todayLocalDateKey(date = new Date()) {
@@ -855,6 +872,7 @@ function renderSyncedCards() {
   if (!cardsListEl || !cardsEmptyEl) return;
   cardsListEl.innerHTML = "";
   cardsEmptyEl.hidden = syncedCards.length > 0;
+  if (!syncedCards.length) setCardFormOpen(true);
 
   for (const card of syncedCards) {
     const bank = getBankById(card.bankId);
@@ -1874,6 +1892,10 @@ document.getElementById("saveCardBtn")?.addEventListener("click", async () => {
 
 document.getElementById("newCardBtn")?.addEventListener("click", () => {
   resetCardForm();
+});
+
+cardFormToggleEl?.addEventListener("click", () => {
+  setCardFormOpen(!isCardFormOpen);
 });
 
 map.on("load", async () => {

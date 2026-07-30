@@ -187,25 +187,38 @@
           </div>
 
           <div id="cardManager" class="card-manager" hidden>
-            <p class="card-manager-copy">
-              Manually add card to track. This does not connect to your bank.
-            </p>
+            <button
+              type="button"
+              id="cardFormToggle"
+              class="card-form-toggle"
+              aria-expanded="false"
+              aria-controls="cardFormPanel"
+            >
+              <span>Add a card</span>
+              <span class="card-form-toggle-icon" aria-hidden="true">+</span>
+            </button>
 
-            <div class="order-bank-grid" id="sidebarBankGrid" aria-label="Bank selector"></div>
+            <div id="cardFormPanel" class="card-form-panel" hidden>
+              <p class="card-manager-copy">
+                Manually add card to track. This does not connect to your bank.
+              </p>
 
-            <label class="field">
-              <span>Card label</span>
-              <input id="sidebarCardLabel" type="text" placeholder="e.g. Chase debit" autocomplete="off" />
-            </label>
+              <div class="order-bank-grid" id="sidebarBankGrid" aria-label="Bank selector"></div>
 
-            <label class="field">
-              <span>Promos left</span>
-              <input id="sidebarCardRemaining" type="number" min="0" max="10" step="1" value="10" />
-            </label>
+              <label class="field">
+                <span>Card label</span>
+                <input id="sidebarCardLabel" type="text" placeholder="e.g. Chase debit" autocomplete="off" />
+              </label>
 
-            <div class="auth-actions">
-              <button type="button" id="saveCardBtn" class="btn">Save card</button>
-              <button type="button" id="newCardBtn" class="btn btn-ghost">New card</button>
+              <label class="field">
+                <span>Promos left</span>
+                <input id="sidebarCardRemaining" type="number" min="0" max="10" step="1" value="10" />
+              </label>
+
+              <div class="auth-actions">
+                <button type="button" id="saveCardBtn" class="btn">Save card</button>
+                <button type="button" id="newCardBtn" class="btn btn-ghost">New card</button>
+              </div>
             </div>
 
             <div id="cardsEmpty" class="cards-empty">No synced cards yet.</div>
