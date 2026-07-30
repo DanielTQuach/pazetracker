@@ -61,11 +61,18 @@ let historyCardId = null;
 let isCardFormOpen = false;
 
 let allFeatures = [];
+let selectedMerchantFeature = null;
 let popup = new maplibregl.Popup({
   closeButton: true,
   closeOnClick: true,
   maxWidth: "300px",
   offset: 14,
+});
+
+popup.on("close", () => {
+  if (!selectedMerchantFeature) return;
+  selectedMerchantFeature = null;
+  renderResults(filteredCollection());
 });
 
 // -----------------------------
@@ -1528,34 +1535,88 @@ async function loadPlacePreview(feature) {
   return data;
 }
 
+function formatPlaceRating(preview) {
+  if (typeof preview?.rating !== "number") return null;
+  const count =
+    typeof preview?.userRatingCount === "number"
+      ? ` (${preview.userRatingCount.toLocaleString()})`
+      : "";
+  return `★ ${preview.rating.toFixed(1)}${count}`;
+}
+
 function buildSearchPreviewHtml(preview) {
   const thumb = preview?.all?.[0]
     ? `<img class="results-thumb" src="${escapeHtml(preview.all[0])}" alt="" loading="lazy" />`
     : `<div class="results-thumb results-thumb--placeholder" aria-hidden="true"></div>`;
 
-  const rating =
-    typeof preview?.rating === "number"
-      ? `<span class="results-rating">★ ${preview.rating.toFixed(1)}${typeof preview?.userRatingCount === "number" ? ` (${preview.userRatingCount})` : ""}</span>`
-      : `<span class="results-rating results-rating--muted">No rating</span>`;
+  const ratingText = formatPlaceRating(preview);
+  const rating = ratingText
+    ? `<span class="results-rating">${escapeHtml(ratingText)}</span>`
+    : `<span class="results-rating results-rating--muted">No rating</span>`;
 
   return `${thumb}<div class="results-preview-meta">${rating}</div>`;
 }
 
-function renderResults(collection) {
+function getFeatureId(feature) {
+  const id = feature?.properties?.id;
+  if (id) return String(id);
+  return getSearchPreviewKey(feature);
+}
+
+function resolveFeature(feature) {
+  if (!feature) return null;
+  const id = feature?.properties?.id;
+  if (id) {
+    const found = allFeatures.find((f) => String(f.properties?.id) === String(id));
+    if (found) return found;
+  }
+  return feature;
+}
+
+function setSelectedMerchant(feature) {
+  selectedMerchantFeature = feature ? resolveFeature(feature) : null;
+}
+
+function buildResultsHits(collection) {
   const query = searchInput.value.trim();
-  if (!query) {
+  const selected = selectedMerchantFeature;
+  const selectedId = selected ? getFeatureId(selected) : null;
+
+  let hits = query ? collection.features.slice(0, 40) : [];
+  if (selected) {
+    hits = hits.filter((f) => getFeatureId(f) !== selectedId);
+    hits.unshift(selected);
+  }
+  return hits;
+}
+
+function renderResults(collection) {
+  const hits = buildResultsHits(collection);
+  const selectedId = selectedMerchantFeature ? getFeatureId(selectedMerchantFeature) : null;
+
+  if (!hits.length) {
     resultsEl.hidden = true;
     resultsEl.innerHTML = "";
     return;
   }
 
-  const hits = collection.features.slice(0, 40);
-  resultsEl.hidden = hits.length === 0;
+  resultsEl.hidden = false;
   resultsEl.innerHTML = hits
     .map((f, i) => {
       const p = f.properties;
       const previewKey = escapeHtml(getSearchPreviewKey(f));
-      return `<li tabindex="0" data-index="${i}">
+      const isSelected = selectedId && getFeatureId(f) === selectedId;
+      const orderLink = p.orderingUrl
+        ? `<a
+            href="${escapeHtml(p.orderingUrl)}"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="results-order-link ordering-link"
+            data-place-id="${escapeHtml(p.id || "")}"
+            data-ordering-url="${escapeHtml(p.orderingUrl)}"
+          >Open Clover ordering -></a>`
+        : "";
+      return `<li tabindex="0" data-index="${i}" class="${isSelected ? "is-selected" : ""}">
         <div class="results-row">
           <div class="results-preview" data-preview-key="${previewKey}">
             <div class="results-thumb results-thumb--placeholder" aria-hidden="true"></div>
@@ -1565,20 +1626,32 @@ function renderResults(collection) {
           </div>
           <div class="results-copy">
             <span class="name">${escapeHtml(p.name)}</span>
+            <span class="results-place-rating" data-rating-key="${previewKey}" hidden></span>
             <span class="meta">${escapeHtml([p.city, p.state].filter(Boolean).join(", "))} · ${escapeHtml(typeLabel(p.businessType))}</span>
+            ${orderLink}
           </div>
         </div>
       </li>`;
     })
     .join("");
 
+  const selectedLi = resultsEl.querySelector("li.is-selected");
+  if (selectedLi) {
+    selectedLi.scrollIntoView({ block: "nearest" });
+  }
   resultsEl.querySelectorAll("li").forEach((li) => {
     const focus = () => {
       const feature = hits[Number(li.dataset.index)];
+      if (!feature) return;
+      setSelectedMerchant(feature);
       flyToFeature(feature);
-      showPopup(feature);
+      showPopup(feature, { syncResults: false });
+      renderResults(filteredCollection());
     };
-    li.addEventListener("click", focus);
+    li.addEventListener("click", (e) => {
+      if (e.target.closest(".ordering-link")) return;
+      focus();
+    });
     li.addEventListener("keydown", (e) => {
       if (e.key === "Enter" || e.key === " ") {
         e.preventDefault();
@@ -1587,25 +1660,45 @@ function renderResults(collection) {
     });
   });
 
+  resultsEl.querySelectorAll(".ordering-link").forEach((link) => {
+    link.addEventListener("click", (e) => {
+      e.stopPropagation();
+      markPendingOrder(link.dataset.placeId, link.dataset.orderingUrl);
+    });
+  });
+
   // Lazy-enrich top search results with Google thumbnails + ratings.
   hits.slice(0, 12).forEach((feature) => {
     const previewKey = getSearchPreviewKey(feature);
     const container = resultsEl.querySelector(`[data-preview-key="${CSS.escape(previewKey)}"]`);
-    if (!container) return;
+    const ratingEl = resultsEl.querySelector(`[data-rating-key="${CSS.escape(previewKey)}"]`);
+    if (!container && !ratingEl) return;
 
     loadPlacePreview(feature)
       .then((preview) => {
-        if (!container.isConnected) return;
-        container.innerHTML = buildSearchPreviewHtml(preview);
+        if (container?.isConnected) {
+          container.innerHTML = buildSearchPreviewHtml(preview);
+        }
+        if (ratingEl?.isConnected) {
+          const ratingText = formatPlaceRating(preview);
+          if (ratingText) {
+            ratingEl.hidden = false;
+            ratingEl.textContent = ratingText;
+          } else {
+            ratingEl.hidden = true;
+            ratingEl.textContent = "";
+          }
+        }
       })
       .catch(() => {
-        if (!container.isConnected) return;
-        container.innerHTML = `
-          <div class="results-thumb results-thumb--placeholder" aria-hidden="true"></div>
-          <div class="results-preview-meta">
-            <span class="results-rating results-rating--muted">Preview unavailable</span>
-          </div>
-        `;
+        if (container?.isConnected) {
+          container.innerHTML = `
+            <div class="results-thumb results-thumb--placeholder" aria-hidden="true"></div>
+            <div class="results-preview-meta">
+              <span class="results-rating results-rating--muted">Preview unavailable</span>
+            </div>
+          `;
+        }
       });
   });
 }
@@ -1708,6 +1801,15 @@ function buildPopupInnerHtml(p, photoState) {
   const badges = [
     `<span class="badge">${escapeHtml(typeLabel(p.businessType))}</span>`,
   ];
+  if (typeof photoState?.rating === "number") {
+    const count =
+      typeof photoState.userRatingCount === "number"
+        ? ` (${photoState.userRatingCount.toLocaleString()})`
+        : "";
+    badges.push(
+      `<span class="badge badge-rating">★ ${photoState.rating.toFixed(1)}${escapeHtml(count)}</span>`
+    );
+  }
   if (p.giftCard === true || p.giftCard === "true") {
     badges.push(`<span class="badge">Gift cards</span>`);
   }
@@ -1770,9 +1872,14 @@ function wirePopupAfterHtmlUpdate(p) {
   refreshCommunityFeed(p.id);
 }
 
-function showPopup(feature) {
-  const p = feature.properties;
-  const [lng, lat] = feature.geometry.coordinates;
+function showPopup(feature, { syncResults = true, openSidebar = false } = {}) {
+  const resolved = resolveFeature(feature) || feature;
+  const p = resolved.properties;
+  const [lng, lat] = resolved.geometry.coordinates;
+
+  setSelectedMerchant(resolved);
+  if (syncResults) renderResults(filteredCollection());
+  if (openSidebar && isMobileSidebar()) setSidebarOpen(true);
 
   popup
     .setLngLat([lng, lat])
@@ -1781,7 +1888,7 @@ function showPopup(feature) {
 
   wirePopupAfterHtmlUpdate(p);
 
-  loadPlaceImages(feature)
+  loadPlaceImages(resolved)
     .then((data) => {
       if (!popup.isOpen()) return;
       popup.setHTML(buildPopupInnerHtml(p, data));
@@ -1909,7 +2016,7 @@ function addMerchantLayers() {
 
   map.on("click", "unclustered", (e) => {
     const feature = e.features[0];
-    showPopup(feature);
+    showPopup(feature, { openSidebar: true });
   });
 
   map.on("mouseenter", "clusters", () => {
@@ -1955,6 +2062,7 @@ document.getElementById("reset").addEventListener("click", () => {
   searchInput.value = "";
   typeSelect.value = "";
   acceptingOnly.checked = false;
+  selectedMerchantFeature = null;
   applyFilters();
   map.flyTo({ center: [-98.35, 39.5], zoom: 3.6 });
   popup.remove();
