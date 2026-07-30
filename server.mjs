@@ -14,6 +14,7 @@ import {
   bumpPromoRedeemed,
   getCommunityTracker,
   getPlaceOrderStats,
+  getPlaceOrderFeed,
   getUserCards,
   initStore,
   logPromoUse,
@@ -23,10 +24,20 @@ import {
   upsertUserCard,
   usesPostgres,
 } from "./db/store.mjs";
+import {
+  assertRateLimit,
+  rateLimitBackend,
+  secondsUntilUtcMidnight,
+  utcDateKey,
+} from "./db/rateLimit.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = __dirname;
 const PORT = Number(process.env.PORT || 5173);
+/** Max crowd order reports per IP per restaurant per UTC day */
+const ORDER_REPORT_PER_PLACE_DAILY_LIMIT = 3;
+/** Max crowd order reports per IP per rolling 24h (all places) */
+const ORDER_REPORT_PER_IP_DAILY_LIMIT = 30;
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -81,11 +92,12 @@ const CLERK_FRONTEND_API =
   process.env.CLERK_FRONTEND_API ||
   deriveClerkFrontendApi(CLERK_PUBLISHABLE_KEY);
 
-function sendJson(res, status, body, cacheSeconds = 300) {
+function sendJson(res, status, body, cacheSeconds = 300, extraHeaders = {}) {
   const payload = JSON.stringify(body);
   res.writeHead(status, {
     "Content-Type": "application/json; charset=utf-8",
     "Cache-Control": `public, max-age=${cacheSeconds}`,
+    ...extraHeaders,
   });
   res.end(payload);
 }
@@ -174,6 +186,28 @@ function placeCacheKey(params) {
   ].join("|");
 }
 
+function getClientIp(req) {
+  const forwarded = req.headers["x-forwarded-for"];
+  if (typeof forwarded === "string" && forwarded.trim()) {
+    return forwarded.split(",")[0].trim();
+  }
+  if (Array.isArray(forwarded) && forwarded[0]) {
+    return String(forwarded[0]).split(",")[0].trim();
+  }
+  return req.socket?.remoteAddress || "unknown";
+}
+
+function sendRateLimited(res, err) {
+  const retryAfterSeconds = err?.retryAfterSeconds || 60;
+  sendJson(
+    res,
+    429,
+    { error: "rate_limited", retryAfterSeconds },
+    0,
+    { "Retry-After": String(retryAfterSeconds) }
+  );
+}
+
 const server = http.createServer(async (req, res) => {
   try {
     const apiKey = getGoogleApiKey();
@@ -189,6 +223,7 @@ const server = http.createServer(async (req, res) => {
             frontendApi: CLERK_FRONTEND_API,
           },
           dataStore: usesPostgres() ? "postgres" : "json",
+          rateLimit: rateLimitBackend(),
         },
         0
       );
@@ -317,6 +352,20 @@ const server = http.createServer(async (req, res) => {
         sendJson(res, 405, { error: "method_not_allowed" });
         return;
       }
+      const ip = getClientIp(req);
+      try {
+        await assertRateLimit({
+          key: `rate:promo-redeem:ip:${ip}`,
+          limit: 10,
+          windowSeconds: 60 * 60,
+        });
+      } catch (err) {
+        if (err?.statusCode === 429) {
+          sendRateLimited(res, err);
+          return;
+        }
+        throw err;
+      }
       const body = await readJsonBody(req).catch(() => ({}));
       const count = Math.max(1, Math.min(10, Number(body?.count) || 1));
       const community = await bumpPromoRedeemed(count);
@@ -331,7 +380,7 @@ const server = http.createServer(async (req, res) => {
         sendJson(res, 400, { error: "missing_placeId", yes: 0, no: 0, total: 0 });
         return;
       }
-      sendJson(res, 200, await getPlaceOrderStats(placeId));
+      sendJson(res, 200, await getPlaceOrderFeed(placeId));
       return;
     }
 
@@ -342,10 +391,31 @@ const server = http.createServer(async (req, res) => {
       }
 
       const body = await readJsonBody(req);
-      const placeId = body?.placeId;
+      const placeId = body?.placeId ? String(body.placeId).trim() : "";
       if (!placeId) {
         sendJson(res, 400, { error: "missing_placeId" });
         return;
+      }
+
+      const ip = getClientIp(req);
+      const day = utcDateKey();
+      try {
+        await assertRateLimit({
+          key: `rate:order-report:ip:${ip}:place:${placeId}:${day}`,
+          limit: ORDER_REPORT_PER_PLACE_DAILY_LIMIT,
+          windowSeconds: secondsUntilUtcMidnight(),
+        });
+        await assertRateLimit({
+          key: `rate:order-report:ip:${ip}`,
+          limit: ORDER_REPORT_PER_IP_DAILY_LIMIT,
+          windowSeconds: 24 * 60 * 60,
+        });
+      } catch (err) {
+        if (err?.statusCode === 429) {
+          sendRateLimited(res, err);
+          return;
+        }
+        throw err;
       }
 
       const result = await recordOrderReport({
@@ -354,6 +424,9 @@ const server = http.createServer(async (req, res) => {
         success: !!body?.success,
         cardInstitution: body?.cardInstitution ?? null,
         cardLabel: body?.cardLabel ?? null,
+        issueReason: body?.issueReason ?? null,
+        device: body?.device ?? null,
+        browser: body?.browser ?? null,
         createdAt: body?.createdAt || new Date().toISOString(),
       });
 
@@ -389,7 +462,16 @@ const server = http.createServer(async (req, res) => {
           lng: parsed.searchParams.get("lng") || "",
         },
         apiKey
-      );
+      ).catch((err) => {
+        console.error("Places search failed:", err.message);
+        return {
+          all: [],
+          logo: "",
+          photos: [],
+          provider: "google",
+          error: "places_api_failed",
+        };
+      });
 
       placePhotoCache.set(cacheKey, { at: Date.now(), data });
       sendJson(res, 200, data);
@@ -433,6 +515,10 @@ const server = http.createServer(async (req, res) => {
   } catch (err) {
     console.error(err);
     if (req.url?.startsWith("/api/")) {
+      if (err?.statusCode === 429) {
+        sendRateLimited(res, err);
+        return;
+      }
       const statusCode = err?.statusCode || 500;
       sendJson(res, statusCode, {
         error: "server_error",
@@ -451,6 +537,7 @@ server.listen(PORT, () => {
   const key = getGoogleApiKey();
   console.log(`pazetracker http://localhost:${PORT}`);
   console.log(`data store: ${usesPostgres() ? "postgres" : "json"}`);
+  console.log(`rate limit: ${rateLimitBackend()}`);
   if (!key) {
     console.warn("GOOGLE_MAPS_API_KEY not set — place photos will not load.");
   }
