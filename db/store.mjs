@@ -598,15 +598,76 @@ export async function getPlaceOrderStats(placeId) {
   };
 }
 
+export async function getRecentOrderReports(placeId, limit = 8) {
+  const max = Math.max(1, Math.min(20, Number(limit) || 8));
+
+  if (!isPostgresEnabled()) {
+    if (!fs.existsSync(ORDER_REPORTS_PATH)) return [];
+    const raw = fs.readFileSync(ORDER_REPORTS_PATH, "utf8");
+    const rows = [];
+    for (const line of raw.split(/\r?\n/).filter(Boolean)) {
+      try {
+        const r = JSON.parse(line);
+        if (r?.placeId !== placeId) continue;
+        rows.push({
+          success: !!r.success,
+          issueReason: r.issueReason || null,
+          device: r.device || null,
+          browser: r.browser || null,
+          createdAt: r.createdAt || null,
+        });
+      } catch {
+        // ignore
+      }
+    }
+    rows.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+    return rows.slice(0, max);
+  }
+
+  const { rows } = await query(
+    `SELECT success, issue_reason, device, browser, created_at
+     FROM order_reports
+     WHERE place_id = $1
+     ORDER BY created_at DESC
+     LIMIT $2`,
+    [placeId, max]
+  );
+  return rows.map((row) => ({
+    success: !!row.success,
+    issueReason: row.issue_reason || null,
+    device: row.device || null,
+    browser: row.browser || null,
+    createdAt: toIso(row.created_at),
+  }));
+}
+
+export async function getPlaceOrderFeed(placeId, limit = 8) {
+  const stats = await getPlaceOrderStats(placeId);
+  const recent = await getRecentOrderReports(placeId, limit);
+  return { ...stats, recent };
+}
+
 export async function recordOrderReport({
   placeId,
   orderingUrl,
   success,
   cardInstitution,
   cardLabel,
+  issueReason,
+  device,
+  browser,
   createdAt,
 }) {
   const at = createdAt || new Date().toISOString();
+  const safeReason =
+    issueReason === "not_taking_orders" || issueReason === "paze_issues"
+      ? issueReason
+      : null;
+  const safeDevice =
+    device === "mobile" || device === "desktop" ? device : null;
+  const safeBrowser = ["chrome", "firefox", "safari", "edge", "other"].includes(browser)
+    ? browser
+    : null;
 
   if (!isPostgresEnabled()) {
     const s = orderStatsByPlaceId.get(placeId) || {
@@ -638,6 +699,9 @@ export async function recordOrderReport({
         success: !!success,
         cardInstitution: cardInstitution ?? null,
         cardLabel: cardLabel ?? null,
+        issueReason: safeReason,
+        device: safeDevice,
+        browser: safeBrowser,
         createdAt: at,
       }) + "\n"
     );
@@ -652,14 +716,18 @@ export async function recordOrderReport({
   return withTransaction(async (client) => {
     await client.query(
       `INSERT INTO order_reports
-         (place_id, ordering_url, success, card_institution, card_label, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6::timestamptz)`,
+         (place_id, ordering_url, success, card_institution, card_label,
+          issue_reason, device, browser, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::timestamptz)`,
       [
         placeId,
         orderingUrl || "",
         !!success,
         cardInstitution ?? null,
         cardLabel ?? null,
+        safeReason,
+        safeDevice,
+        safeBrowser,
         at,
       ]
     );

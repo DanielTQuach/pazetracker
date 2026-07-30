@@ -70,6 +70,11 @@ CREATE TABLE IF NOT EXISTS order_reports (
 CREATE INDEX IF NOT EXISTS order_reports_place_id_idx ON order_reports (place_id);
 CREATE INDEX IF NOT EXISTS order_reports_created_at_idx ON order_reports (created_at DESC);
 
+-- Report detail columns (issue reason, device, browser)
+ALTER TABLE order_reports ADD COLUMN IF NOT EXISTS issue_reason TEXT;
+ALTER TABLE order_reports ADD COLUMN IF NOT EXISTS device TEXT;
+ALTER TABLE order_reports ADD COLUMN IF NOT EXISTS browser TEXT;
+
 -- Per-place aggregate (updated atomically with each report)
 CREATE TABLE IF NOT EXISTS place_order_stats (
   place_id          TEXT PRIMARY KEY,
