@@ -15,6 +15,7 @@ import {
   getCommunityTracker,
   getPlaceOrderStats,
   getPlaceOrderFeed,
+  deleteUserCard,
   getUserCards,
   initStore,
   logPromoUse,
@@ -335,6 +336,29 @@ const server = http.createServer(async (req, res) => {
           remainingCount,
         });
         sendJson(res, 200, result);
+        return;
+      }
+
+      if (req.method === "DELETE") {
+        const parsed = new URL(req.url, `http://localhost:${PORT}`);
+        const body = await readJsonBody(req).catch(() => ({}));
+        const cardId = String(
+          body?.cardId || body?.id || parsed.searchParams.get("cardId") || ""
+        ).trim();
+        if (!cardId) {
+          sendJson(res, 400, { error: "missing_card_id" });
+          return;
+        }
+        try {
+          const result = await deleteUserCard(userId, cardId);
+          sendJson(res, 200, { ok: true, ...result });
+        } catch (err) {
+          if (err?.statusCode) {
+            sendJson(res, err.statusCode, { error: err.message });
+            return;
+          }
+          throw err;
+        }
         return;
       }
 

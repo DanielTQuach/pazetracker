@@ -339,6 +339,45 @@ export async function upsertUserCard(userId, { id, bankId, label, remainingCount
   return { cards, savedCardId: cardId };
 }
 
+/**
+ * Remove a synced card and its personal promo_uses history.
+ * Does not change community_stats (pending/confirmed/promos reported stay).
+ */
+export async function deleteUserCard(userId, cardId) {
+  const id = String(cardId || "").trim();
+  if (!id) {
+    const err = new Error("missing_card_id");
+    err.statusCode = 400;
+    throw err;
+  }
+
+  if (!isPostgresEnabled()) {
+    const cards = Array.isArray(userCardsStore[userId]) ? userCardsStore[userId] : [];
+    const next = cards.filter((c) => String(c.id) !== id);
+    if (next.length === cards.length) {
+      const err = new Error("card_not_found");
+      err.statusCode = 404;
+      throw err;
+    }
+    userCardsStore[userId] = next;
+    persistUserCardsStoreJson();
+    return { cards: next.map(normalizeCard), deletedCardId: id };
+  }
+
+  const { rowCount } = await query(
+    `DELETE FROM user_cards WHERE id = $1 AND user_id = $2`,
+    [id, userId]
+  );
+  if (!rowCount) {
+    const err = new Error("card_not_found");
+    err.statusCode = 404;
+    throw err;
+  }
+
+  const cards = await getUserCards(userId);
+  return { cards, deletedCardId: id };
+}
+
 export async function logPromoUse(userId, { cardId, bankId, label, placeId, usedAt }) {
   const usedDate = usedAt || todayLocalDateKey();
 

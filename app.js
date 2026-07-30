@@ -406,6 +406,40 @@ function resetCardForm() {
   setCardFormOpen(true);
 }
 
+async function deleteSyncedCard(cardId) {
+  const id = String(cardId || "").trim();
+  if (!id) return;
+  const card = syncedCards.find((c) => String(c.id) === id);
+  const label = card?.label || "this card";
+  if (
+    !confirm(
+      `Delete “${label}”? This removes the card and its promo history from your tracker. Community totals stay the same.`
+    )
+  ) {
+    return;
+  }
+
+  const res = await authedFetch(`/api/user-cards?cardId=${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    const txt = await res.text().catch(() => "");
+    throw new Error(`Failed to delete card (${res.status}) ${txt}`);
+  }
+  const data = await res.json();
+  syncedCards = Array.isArray(data.cards) ? data.cards : [];
+  if (String(selectedSyncedCardId) === id) {
+    selectedSyncedCardId = null;
+    selectedSidebarBankId = BANKS[0]?.id || "";
+    if (sidebarCardLabelEl) sidebarCardLabelEl.value = "";
+    if (sidebarCardRemainingEl) sidebarCardRemainingEl.value = "10";
+    renderSidebarBankChoices();
+  }
+  if (historyCardId && String(historyCardId) === id) closeHistoryModal();
+  renderSyncedCards();
+  renderPersonalStats();
+}
+
 function todayLocalDateKey(date = new Date()) {
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, "0");
@@ -978,18 +1012,21 @@ function renderSyncedCards() {
     item.className = "saved-card";
     if (card.id === selectedSyncedCardId) item.classList.add("is-selected");
     item.innerHTML = `
-      <button type="button" class="saved-card-select" aria-label="Select ${escapeHtml(card.label)}">
-        <div class="saved-card-top">
-          <div class="order-bank-simulated-card">${bankShortHtml(bank.short)}</div>
-          <div class="saved-card-copy">
-            <span class="saved-card-label">${escapeHtml(card.label)}</span>
-            <span class="saved-card-bank">${escapeHtml(bank.name)}</span>
-            <span class="saved-card-remaining">${clampRemaining(card.remainingCount)}/10 promos left${
-              pendingCredits ? ` · ${pendingCredits} pending credit${pendingCredits === 1 ? "" : "s"}` : ""
-            }</span>
+      <div class="saved-card-row">
+        <button type="button" class="saved-card-select" aria-label="Select ${escapeHtml(card.label)}">
+          <div class="saved-card-top">
+            <div class="order-bank-simulated-card">${bankShortHtml(bank.short)}</div>
+            <div class="saved-card-copy">
+              <span class="saved-card-label">${escapeHtml(card.label)}</span>
+              <span class="saved-card-bank">${escapeHtml(bank.name)}</span>
+              <span class="saved-card-remaining">${clampRemaining(card.remainingCount)}/10 promos left${
+                pendingCredits ? ` · ${pendingCredits} pending credit${pendingCredits === 1 ? "" : "s"}` : ""
+              }</span>
+            </div>
           </div>
-        </div>
-      </button>
+        </button>
+        <button type="button" class="saved-card-delete" aria-label="Delete ${escapeHtml(card.label)}" title="Delete card">×</button>
+      </div>
       <div class="saved-card-actions">
         <button type="button" class="btn btn-ghost history-btn">History</button>
       </div>
@@ -1007,6 +1044,16 @@ function renderSyncedCards() {
     item.querySelector(".history-btn")?.addEventListener("click", (e) => {
       e.stopPropagation();
       openHistoryModal(card.id);
+    });
+
+    item.querySelector(".saved-card-delete")?.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      try {
+        await deleteSyncedCard(card.id);
+      } catch (err) {
+        console.error(err);
+        alert(err?.message || "Failed to delete card.");
+      }
     });
 
     cardsListEl.appendChild(item);
