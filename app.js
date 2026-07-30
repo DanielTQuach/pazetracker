@@ -1235,7 +1235,13 @@ async function openOrderModalFromPending() {
   if (!currentPendingOrder?.placeId) return;
 
   orderModalOpen = true;
-  sessionStorage.setItem("pazetracker_order_modal_open_v1", "1");
+  awaitingOrderReturn = false;
+  sawLeaveForOrder = false;
+  if (orderReturnWatchTimer) {
+    clearInterval(orderReturnWatchTimer);
+    orderReturnWatchTimer = null;
+  }
+  sessionStorage.setItem(ORDER_MODAL_OPEN_STORAGE_KEY, "1");
 
   if (orderModal) {
     orderModal.hidden = false;
@@ -1255,7 +1261,13 @@ function closeOrderModal({ keepPending = false } = {}) {
     orderModal.setAttribute("aria-hidden", "true");
   }
   orderModalOpen = false;
-  sessionStorage.removeItem("pazetracker_order_modal_open_v1");
+  awaitingOrderReturn = false;
+  sawLeaveForOrder = false;
+  if (orderReturnWatchTimer) {
+    clearInterval(orderReturnWatchTimer);
+    orderReturnWatchTimer = null;
+  }
+  sessionStorage.removeItem(ORDER_MODAL_OPEN_STORAGE_KEY);
   if (!keepPending) sessionStorage.removeItem(PENDING_ORDER_STORAGE_KEY);
   currentPendingOrder = null;
 }
@@ -1407,16 +1419,55 @@ async function refreshCommunityFeed(placeId) {
   };
 }
 
+const ORDER_MODAL_OPEN_STORAGE_KEY = "pazetracker_order_modal_open_v1";
+let awaitingOrderReturn = false;
+let sawLeaveForOrder = false;
+let orderReturnWatchTimer = null;
+
+function markPendingOrder(placeId, orderingUrl) {
+  if (!placeId || !orderingUrl) return;
+  // Fresh page loads never have the modal open — clear any stuck flag from a prior session.
+  sessionStorage.removeItem(ORDER_MODAL_OPEN_STORAGE_KEY);
+  orderModalOpen = false;
+  sessionStorage.setItem(
+    PENDING_ORDER_STORAGE_KEY,
+    JSON.stringify({ placeId, orderingUrl, at: Date.now() })
+  );
+  awaitingOrderReturn = true;
+  sawLeaveForOrder = false;
+  startOrderReturnWatch();
+}
+
+function noteLeftForOrder() {
+  if (!awaitingOrderReturn) return;
+  sawLeaveForOrder = true;
+}
+
+function startOrderReturnWatch() {
+  if (orderReturnWatchTimer) clearInterval(orderReturnWatchTimer);
+  const startedAt = Date.now();
+  orderReturnWatchTimer = setInterval(() => {
+    if (!awaitingOrderReturn || Date.now() - startedAt > 30 * 60 * 1000) {
+      clearInterval(orderReturnWatchTimer);
+      orderReturnWatchTimer = null;
+      return;
+    }
+    if (
+      sawLeaveForOrder &&
+      document.visibilityState === "visible" &&
+      document.hasFocus()
+    ) {
+      checkPendingOrder();
+    }
+  }, 700);
+}
+
 function wireOrderingLinkHandler(p) {
   const popupEl = popup.getElement();
   const link = popupEl?.querySelector(".ordering-link");
   if (!link) return;
   link.addEventListener("click", () => {
-    if (!p?.id || !p?.orderingUrl) return;
-    sessionStorage.setItem(
-      PENDING_ORDER_STORAGE_KEY,
-      JSON.stringify({ placeId: p.id, orderingUrl: p.orderingUrl, at: Date.now() })
-    );
+    markPendingOrder(p?.id, p?.orderingUrl);
   });
 }
 
@@ -1973,9 +2024,12 @@ map.on("load", async () => {
 
 wireOrderModalUi();
 
+// After a reload the DOM modal is closed, but this flag can linger and block reopen.
+sessionStorage.removeItem(ORDER_MODAL_OPEN_STORAGE_KEY);
+
 function checkPendingOrder() {
   if (orderModalOpen) return;
-  if (sessionStorage.getItem("pazetracker_order_modal_open_v1") === "1") return;
+  if (sessionStorage.getItem(ORDER_MODAL_OPEN_STORAGE_KEY) === "1") return;
   const raw = sessionStorage.getItem(PENDING_ORDER_STORAGE_KEY);
   if (!raw) return;
 
@@ -1984,10 +2038,12 @@ function checkPendingOrder() {
     const pending = JSON.parse(raw);
     if (pending?.at && Date.now() - pending.at > 10 * 60 * 1000) {
       sessionStorage.removeItem(PENDING_ORDER_STORAGE_KEY);
+      awaitingOrderReturn = false;
       return;
     }
   } catch {
     sessionStorage.removeItem(PENDING_ORDER_STORAGE_KEY);
+    awaitingOrderReturn = false;
     return;
   }
 
@@ -1996,7 +2052,10 @@ function checkPendingOrder() {
 
 let hasBeenHiddenSinceLoad = false;
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "hidden") hasBeenHiddenSinceLoad = true;
+  if (document.visibilityState === "hidden") {
+    hasBeenHiddenSinceLoad = true;
+    noteLeftForOrder();
+  }
   if (document.visibilityState === "visible" && hasBeenHiddenSinceLoad) {
     hasBeenHiddenSinceLoad = false;
     checkPendingOrder();
@@ -2006,11 +2065,17 @@ document.addEventListener("visibilitychange", () => {
 let hasLostFocusSinceLoad = false;
 window.addEventListener("blur", () => {
   hasLostFocusSinceLoad = true;
+  noteLeftForOrder();
 });
 window.addEventListener("focus", () => {
   if (!hasLostFocusSinceLoad) return;
   hasLostFocusSinceLoad = false;
   checkPendingOrder();
+});
+
+window.addEventListener("pageshow", (event) => {
+  // Only on back/forward cache restore — never on a normal refresh/load.
+  if (event.persisted) checkPendingOrder();
 });
 
 function setSidebarOpen(isOpen) {
