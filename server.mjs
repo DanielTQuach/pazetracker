@@ -119,7 +119,14 @@ function serveStatic(req, res) {
       return;
     }
     const ext = path.extname(filePath).toLowerCase();
-    res.writeHead(200, { "Content-Type": MIME[ext] || "application/octet-stream" });
+    const headers = {
+      "Content-Type": MIME[ext] || "application/octet-stream",
+    };
+    // Explicitly allow geolocation for this origin (Safari is strict about this).
+    if (ext === ".html") {
+      headers["Permissions-Policy"] = "geolocation=(self)";
+    }
+    res.writeHead(200, headers);
     res.end(data);
   });
 }

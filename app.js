@@ -1960,22 +1960,79 @@ document.getElementById("reset").addEventListener("click", () => {
   popup.remove();
 });
 
-document.getElementById("locate").addEventListener("click", () => {
+function geolocationErrorMessage(err) {
+  if (!window.isSecureContext) {
+    return "Location needs a secure (https) connection. Open the site over https and try again.";
+  }
+  switch (err?.code) {
+    case 1: // PERMISSION_DENIED
+      return "Location permission is blocked. On iPhone: tap Aa in the address bar → Website Settings → Location → Allow, or Settings → Safari → Location, then try Near me again.";
+    case 2: // POSITION_UNAVAILABLE
+      return "Location is unavailable. Turn on Location Services (Settings → Privacy & Security → Location Services) and try again.";
+    case 3: // TIMEOUT
+      return "Timed out getting your location. Move somewhere with a clearer signal and try again.";
+    default:
+      return "Could not get your location.";
+  }
+}
+
+function getBrowserPosition(options) {
+  return new Promise((resolve, reject) => {
+    navigator.geolocation.getCurrentPosition(resolve, reject, options);
+  });
+}
+
+document.getElementById("locate").addEventListener("click", async () => {
   if (!navigator.geolocation) {
     alert("Geolocation is not available in this browser.");
     return;
   }
-  navigator.geolocation.getCurrentPosition(
-    (pos) => {
-      map.flyTo({
-        center: [pos.coords.longitude, pos.coords.latitude],
-        zoom: 11.5,
-        speed: 1.4,
+  if (!window.isSecureContext) {
+    alert(geolocationErrorMessage({ code: -1 }));
+    return;
+  }
+
+  const btn = document.getElementById("locate");
+  const prevLabel = btn?.textContent || "Near me";
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "Locating…";
+  }
+
+  try {
+    let pos;
+    try {
+      // Safari often fails high-accuracy GPS indoors; try network/wifi first.
+      pos = await getBrowserPosition({
+        enableHighAccuracy: false,
+        timeout: 15000,
+        maximumAge: 60_000,
       });
-    },
-    () => alert("Could not get your location."),
-    { enableHighAccuracy: true, timeout: 10000 }
-  );
+    } catch (firstErr) {
+      if (firstErr?.code === 1) throw firstErr;
+      pos = await getBrowserPosition({
+        enableHighAccuracy: true,
+        timeout: 20000,
+        maximumAge: 0,
+      });
+    }
+
+    map.flyTo({
+      center: [pos.coords.longitude, pos.coords.latitude],
+      zoom: 11.5,
+      speed: 1.4,
+    });
+
+    if (isMobileSidebar()) setSidebarOpen(false);
+  } catch (err) {
+    console.warn("geolocation failed", err);
+    alert(geolocationErrorMessage(err));
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = prevLabel;
+    }
+  }
 });
 
 document.getElementById("signInBtn")?.addEventListener("click", async () => {
