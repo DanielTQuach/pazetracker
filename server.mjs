@@ -113,28 +113,106 @@ function serveStatic(req, res) {
     return;
   }
 
-  fs.readFile(filePath, (err, data) => {
-    if (err) {
+  // Stream large assets (esp. ~13MB GeoJSON) instead of buffering whole file in RAM.
+  fs.stat(filePath, (statErr, stats) => {
+    if (statErr || !stats.isFile()) {
       res.writeHead(404).end("Not found");
       return;
     }
     const ext = path.extname(filePath).toLowerCase();
     const headers = {
       "Content-Type": MIME[ext] || "application/octet-stream",
+      "Content-Length": String(stats.size),
+      "Cache-Control":
+        ext === ".geojson" || ext === ".json"
+          ? "public, max-age=300"
+          : "public, max-age=60",
     };
-    // Explicitly allow geolocation for this origin (Safari is strict about this).
     if (ext === ".html") {
       headers["Permissions-Policy"] = "geolocation=(self)";
+      headers["Cache-Control"] = "no-cache";
     }
     res.writeHead(200, headers);
-    res.end(data);
+    const stream = fs.createReadStream(filePath);
+    stream.on("error", (err) => {
+      console.error("static stream error:", err.message);
+      if (!res.headersSent) res.writeHead(500);
+      res.end();
+    });
+    stream.pipe(res);
   });
 }
 
-const placePhotoCache = new Map();
-const photoBytesCache = new Map();
-const CACHE_TTL_MS = 10 * 60 * 1000;
-const PHOTO_BYTES_TTL_MS = 24 * 60 * 60 * 1000;
+/** Bounded TTL cache to avoid Railway OOM from unbounded photo buffers. */
+function createTtlCache({ maxEntries, maxBytes = Infinity, ttlMs }) {
+  /** @type {Map<string, { at: number, value: any, bytes: number }>} */
+  const map = new Map();
+  let totalBytes = 0;
+
+  function touch(key, entry) {
+    map.delete(key);
+    map.set(key, entry);
+  }
+
+  function purgeExpired(now = Date.now()) {
+    for (const [key, entry] of map) {
+      if (now - entry.at > ttlMs) {
+        totalBytes -= entry.bytes;
+        map.delete(key);
+      }
+    }
+  }
+
+  function evictOverflow() {
+    while (map.size > maxEntries || totalBytes > maxBytes) {
+      const oldestKey = map.keys().next().value;
+      if (oldestKey == null) break;
+      const oldest = map.get(oldestKey);
+      totalBytes -= oldest?.bytes || 0;
+      map.delete(oldestKey);
+    }
+  }
+
+  return {
+    get(key) {
+      purgeExpired();
+      const entry = map.get(key);
+      if (!entry) return null;
+      if (Date.now() - entry.at > ttlMs) {
+        totalBytes -= entry.bytes;
+        map.delete(key);
+        return null;
+      }
+      touch(key, entry);
+      return entry.value;
+    },
+    set(key, value, bytes = 0) {
+      purgeExpired();
+      const size = Math.max(0, Number(bytes) || 0);
+      const existing = map.get(key);
+      if (existing) totalBytes -= existing.bytes;
+      const entry = { at: Date.now(), value, bytes: size };
+      touch(key, entry);
+      totalBytes += size;
+      evictOverflow();
+    },
+    stats() {
+      purgeExpired();
+      return { entries: map.size, bytes: totalBytes };
+    },
+  };
+}
+
+const placePhotoCache = createTtlCache({
+  maxEntries: 400,
+  ttlMs: 10 * 60 * 1000,
+});
+const photoBytesCache = createTtlCache({
+  maxEntries: 120,
+  // Cap decoded Google photo buffers (~25MB) so browsing many pins can't OOM Railway.
+  maxBytes: 25 * 1024 * 1024,
+  ttlMs: 60 * 60 * 1000,
+});
 
 function readJsonBody(req) {
   return new Promise((resolve, reject) => {
@@ -219,6 +297,31 @@ function sendRateLimited(res, err) {
 const server = http.createServer(async (req, res) => {
   try {
     const apiKey = getGoogleApiKey();
+
+    if (req.url?.startsWith("/api/health")) {
+      const mem = process.memoryUsage();
+      sendJson(
+        res,
+        200,
+        {
+          ok: true,
+          uptimeSeconds: Math.round(process.uptime()),
+          memory: {
+            rssMb: Math.round(mem.rss / 1024 / 1024),
+            heapUsedMb: Math.round(mem.heapUsed / 1024 / 1024),
+            heapTotalMb: Math.round(mem.heapTotal / 1024 / 1024),
+          },
+          caches: {
+            placePhotos: placePhotoCache.stats(),
+            photoBytes: photoBytesCache.stats(),
+          },
+          dataStore: usesPostgres() ? "postgres" : "json",
+          rateLimit: rateLimitBackend(),
+        },
+        0
+      );
+      return;
+    }
 
     if (req.url?.startsWith("/api/config")) {
       sendJson(
@@ -478,8 +581,8 @@ const server = http.createServer(async (req, res) => {
       const parsed = new URL(req.url, `http://localhost:${PORT}`);
       const cacheKey = placeCacheKey(parsed.searchParams);
       const cached = placePhotoCache.get(cacheKey);
-      if (cached && Date.now() - cached.at < CACHE_TTL_MS) {
-        sendJson(res, 200, cached.data);
+      if (cached) {
+        sendJson(res, 200, cached);
         return;
       }
 
@@ -504,7 +607,7 @@ const server = http.createServer(async (req, res) => {
         };
       });
 
-      placePhotoCache.set(cacheKey, { at: Date.now(), data });
+      placePhotoCache.set(cacheKey, data, JSON.stringify(data).length);
       sendJson(res, 200, data);
       return;
     }
@@ -523,7 +626,7 @@ const server = http.createServer(async (req, res) => {
       }
 
       const cached = photoBytesCache.get(ref);
-      if (cached && Date.now() - cached.at < PHOTO_BYTES_TTL_MS) {
+      if (cached) {
         res.writeHead(200, {
           "Content-Type": cached.contentType,
           "Cache-Control": "public, max-age=86400",
@@ -533,7 +636,7 @@ const server = http.createServer(async (req, res) => {
       }
 
       const { buffer, contentType } = await fetchGooglePhotoBytes(ref, apiKey);
-      photoBytesCache.set(ref, { at: Date.now(), buffer, contentType });
+      photoBytesCache.set(ref, { buffer, contentType }, buffer.length);
       res.writeHead(200, {
         "Content-Type": contentType,
         "Cache-Control": "public, max-age=86400",
@@ -563,6 +666,13 @@ const server = http.createServer(async (req, res) => {
 });
 
 await initStore();
+
+process.on("uncaughtException", (err) => {
+  console.error("uncaughtException:", err);
+});
+process.on("unhandledRejection", (err) => {
+  console.error("unhandledRejection:", err);
+});
 
 server.listen(PORT, () => {
   const key = getGoogleApiKey();
