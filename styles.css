@@ -966,12 +966,21 @@ body {
     left: 0;
     /* Above backdrop (1002), below toggle (1004) so controls are tappable */
     z-index: 1003;
+    /* --app-vh is set from window.innerHeight only where dvh is unsupported */
     height: 100vh;
+    height: calc(var(--app-vh, 1vh) * 100);
     height: 100dvh;
     width: min(92vw, 380px);
     box-shadow: var(--shadow);
     padding-top: 4rem;
+    padding-bottom: calc(1rem + env(safe-area-inset-bottom));
+    overscroll-behavior: contain;
+    touch-action: pan-y;
     -webkit-overflow-scrolling: touch;
+  }
+
+  body.sidebar-open {
+    overflow: hidden;
   }
 
   .panel.is-open {
@@ -990,8 +999,27 @@ body {
 
   #map {
     min-height: 100vh;
+    min-height: calc(var(--app-vh, 1vh) * 100);
     min-height: 100dvh;
   }
+}
+
+.viewport-diag {
+  position: fixed;
+  z-index: 2000;
+  left: 8px;
+  right: 8px;
+  bottom: 8px;
+  margin: 0;
+  padding: 0.5rem 0.6rem;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.82);
+  color: #7dffb0;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-size: 10px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 /* Order tracking modal (Yelp-like prompt on return to pazetracker tab) */

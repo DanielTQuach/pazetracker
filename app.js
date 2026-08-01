@@ -2250,28 +2250,46 @@ function setSidebarOpen(isOpen) {
   sidebarBackdropEl.hidden = !open;
   sidebarToggleEl.setAttribute("aria-expanded", String(open));
   sidebarToggleEl.setAttribute("aria-label", open ? "Close controls" : "Open controls");
+  document.body.classList.toggle("sidebar-open", open && isMobileSidebar());
 }
 
 function isMobileSidebar() {
   return window.matchMedia("(max-width: 860px)").matches;
 }
 
+// Browsers without dvh support size 100vh to the tallest viewport, so the
+// bottom of a full-height fixed panel sits under the address bar and cannot be
+// scrolled into view. Feed them the real height instead.
+function initViewportHeightFallback() {
+  if (window.CSS && CSS.supports && CSS.supports("height", "100dvh")) return;
+
+  const sync = () => {
+    const height = window.innerHeight;
+    if (height > 0) {
+      document.documentElement.style.setProperty("--app-vh", `${height / 100}px`);
+    }
+  };
+
+  sync();
+  window.addEventListener("resize", sync);
+  window.addEventListener("orientationchange", sync);
+}
+
 function initMobileSidebar() {
   if (!sidebarToggleEl || !sidebarPanelEl || !sidebarBackdropEl) return;
 
-  const applyByWidth = () => {
-    if (!isMobileSidebar()) {
-      sidebarPanelEl.classList.remove("is-open");
-      sidebarBackdropEl.hidden = true;
-      sidebarToggleEl.setAttribute("aria-expanded", "false");
-      sidebarToggleEl.setAttribute("aria-label", "Open controls");
-      return;
-    }
-    setSidebarOpen(false);
-  };
+  // Listen for breakpoint crossings only. A plain resize listener also fires
+  // when Android shows/hides the address bar or soft keyboard, which would
+  // slam the panel shut mid-scroll.
+  const mobileQuery = window.matchMedia("(max-width: 860px)");
+  const applyByWidth = () => setSidebarOpen(false);
 
   applyByWidth();
-  window.addEventListener("resize", applyByWidth);
+  if (typeof mobileQuery.addEventListener === "function") {
+    mobileQuery.addEventListener("change", applyByWidth);
+  } else if (typeof mobileQuery.addListener === "function") {
+    mobileQuery.addListener(applyByWidth);
+  }
 
   sidebarToggleEl.addEventListener("click", () => {
     if (!isMobileSidebar()) return;
@@ -2286,7 +2304,59 @@ function initMobileSidebar() {
   });
 }
 
+// Opt-in overlay (?diag=1) so someone on a device we cannot inspect remotely
+// can screenshot the layout numbers behind a scrolling or sizing report.
+function initViewportDiagnostics() {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get("diag") !== "1") return;
+
+  const box = document.createElement("pre");
+  box.className = "viewport-diag";
+  document.body.appendChild(box);
+
+  let resizes = 0;
+  let lastResize = "none";
+
+  const render = () => {
+    const vv = window.visualViewport;
+    const panelScrollable = sidebarPanelEl
+      ? sidebarPanelEl.scrollHeight > sidebarPanelEl.clientHeight
+      : false;
+    const panelBottomHidden = sidebarPanelEl
+      ? Math.round(sidebarPanelEl.getBoundingClientRect().bottom - window.innerHeight)
+      : 0;
+
+    box.textContent = [
+      `ua        ${navigator.userAgent}`,
+      `window    ${window.innerWidth} x ${window.innerHeight} @${window.devicePixelRatio}`,
+      `visual    ${vv ? `${Math.round(vv.width)} x ${Math.round(vv.height)}` : "n/a"}`,
+      `dvh       ${window.CSS && CSS.supports ? CSS.supports("height", "100dvh") : "unknown"}`,
+      `panel     open=${sidebarPanelEl ? sidebarPanelEl.classList.contains("is-open") : "n/a"}`,
+      `panel h   client=${sidebarPanelEl ? sidebarPanelEl.clientHeight : 0} scroll=${sidebarPanelEl ? sidebarPanelEl.scrollHeight : 0}`,
+      `scrollable ${panelScrollable}`,
+      `offscreen ${panelBottomHidden}px below fold`,
+      `resizes   ${resizes} (last: ${lastResize})`,
+    ].join("\n");
+  };
+
+  const onResize = () => {
+    resizes += 1;
+    lastResize = `${window.innerWidth}x${window.innerHeight}`;
+    render();
+  };
+
+  window.addEventListener("resize", onResize);
+  window.addEventListener("orientationchange", onResize);
+  if (window.visualViewport) window.visualViewport.addEventListener("resize", onResize);
+  if (sidebarPanelEl) sidebarPanelEl.addEventListener("scroll", render, { passive: true });
+  box.addEventListener("click", () => box.remove());
+  setInterval(render, 1000);
+  render();
+}
+
+initViewportHeightFallback();
 initMobileSidebar();
+initViewportDiagnostics();
 
 renderSidebarBankChoices();
 resetCardForm();
